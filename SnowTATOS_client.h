@@ -1,7 +1,7 @@
 /*
 
   A library to collect common libraries and functions necessary for SnowTATOS
-  client and server.
+  client.
 
   Ian Raphael
   2023.05.03
@@ -9,8 +9,8 @@
 
 */
 
-#ifndef SnowTATOS_h
-#define SnowTATOS_h
+#ifndef SnowTATOS_client_h
+#define SnowTATOS_client_h
 
 #include "dataFile.h"
 #include "TempSensors.h"
@@ -18,7 +18,6 @@
 #include "SnowPinger.h"
 #include "TimeSnowTATOS.h"
 #include <SerialFlash.h>
-#include <Wire.h>
 
 const int flashChipSelect = 4;
 
