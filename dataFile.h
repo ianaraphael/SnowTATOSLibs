@@ -159,6 +159,22 @@ int readFileBytes(File dataFile, uint8_t* buffer, int numBytesToRead) {
   return numBytesRead;
 }
 
+/************ dataFile_getData ************/
+/*
+function for getting the first line of data from every file stored by the sensor.
+controller. does NOT check buffer size, file contents, etc. just reads in data
+from each file until it hits a new line.
+*/
+char* dataFile_getData(char* dataPointer) {
+  // for every file in the directory
+    // read the first line into the buffer
+
+  char testData[] = "Hello this is a really long message that won't fit into one packet.";
+
+  // return the buffer
+  dataPointer = testData;
+}
+
 
 
 /************ init_SD ************/

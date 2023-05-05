@@ -13,6 +13,10 @@
 #define SnowTATOS_server_h
 
 #define STATION_ID SERVER_ADDRESS // our station id is the server address (0)
+// size of the data that simb expects over i2c for transmission. fx of individual
+// sample size, number of stations, sampling frequency, transmit frequency
+#define I2C_DATASIZE 68
+
 const int flashChipSelect = 4;
 
 #include "dataFile.h"
@@ -44,34 +48,6 @@ void boardSetup() {
   // put the flash chip to sleep since we are using SD
   SerialFlash.begin(flashChipSelect);
   SerialFlash.sleep();
-
-  // Initialize I2C comms as slave
-  Wire.begin(SLAVE_ADDR);
-
-  // Function to run when data requested from master
-  Wire.onRequest(requestEvent);
-
-  // pull the chip select pin down
-  pinMode(SENSORCONTROLLER_CS,INPUT_PULLDOWN);
-
-
-  SerialUSB.println("Sensor controller initiated, waiting for SIMB to initialize");
-  //TODO: don't wait for SIMB to initialize
-  // wait around until SIMB gives us the go ahead by shifting the chip select high
-  while(digitalRead(SENSORCONTROLLER_CS) == LOW) {
-  }
-
-  SerialUSB.println("SIMB activated, attaching interrupt");
-
-  // pull up the chip select pin
-  pinMode(SENSORCONTROLLER_CS,INPUT_PULLUP);
-
-  // delay for a moment
-  delay(10);
-
-  // then attach an interrupt to trigger on a low pin
-  attachInterrupt(digitalPinToInterrupt(SENSORCONTROLLER_CS), simbInterruptHandler, LOW);
-
 }
 
 #endif

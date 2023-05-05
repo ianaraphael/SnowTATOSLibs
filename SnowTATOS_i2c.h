@@ -1,10 +1,10 @@
 /*
 
-  A library to deal with i2c comms between SnowTATOS sensor controller and simb
+A library to deal with i2c comms between SnowTATOS sensor controller and simb
 
-  Ian Raphael
-  2023.05.04
-  ian.a.raphael.th@dartmouth.edu
+Ian Raphael
+2023.05.04
+ian.a.raphael.th@dartmouth.edu
 
 */
 
@@ -12,13 +12,28 @@
 #define SnowTATOS_i2c_h
 
 #include <Wire.h>
+#include "dataFile.h"
 
 #define SLAVE_ADDR 9 // Define sensor controller (SC) I2C Address
 #define MAX_PACKET_SIZE 32 // define
 #define SENSORCONTROLLER_CS 6 // chip select
-volatile bool withSimb false; // indicates that we're in transaction with SIMB
+volatile int DATA_SIZE;
 
+// collection state variable to keep track of what information we've sent to the
+// simb.
+// i2cCollectionState = -1
+//    free state. SC is not communicating with simb and is free to do whatever it wants.
+// i2cCollectionState = 0
+//    pre free state. finished data transfer and SC is ready to go back to free state after this
+// i2cCollectionState = 1
+//    standby state. wait for a data reqest interrupt from the SIMB, then put the data buffer on the wire
+// i2cCollectionState = 2
+//    data packing state. simb is asking for the next packet of data. we'll package the
+//    next packet then go back to standby state.
+volatile int i2cCollectionState = -1;
+volatile bool simbRequestFlag = false; // indicates that the simb has requested data from us
 volatile uint8_t i2cSendBuf[MAX_PACKET_SIZE+1]; // add one byte for a null terminator so that we can print on this side. not for transmission.
+volatile uint16_t currI2cPacketSize;
 
 // service routine for getting a Wire data request from the SIMB. Puts the requested
 // data on the line
@@ -31,15 +46,15 @@ void requestEvent() {
   if (i2cCollectionState == 0) {
 
     // set withSimb false to indicate that we're no longer in a transaction
-    withSimb = false;
+    simbRequestFlag = false;
 
     // enter sleep state
     i2cCollectionState = -1;
 
-  } else if (i2cCollectionState == 2) {
+  } else if (i2cCollectionState == 1) {
 
     // go to data packaging state
-    i2cCollectionState = 3;
+    i2cCollectionState = 2;
   }
 }
 
@@ -47,22 +62,137 @@ void requestEvent() {
 // service routine for handling chip select interrupt from SIMB
 void simbInterruptHandler(void) {
 
-  // set withSimb true to indicate that we're in a transaction with the simb
-  withSimb = true;
-
   // if chip select is actually low
-  if (digitalRead(SENSORCONTROLLER_CS) == LOW) {
+  if ((digitalRead(SENSORCONTROLLER_CS) == LOW) && (i2cCollectionState == -1)) {
 
     // detach the interrupt so we don't get stuck in a loop
     detachInterrupt(digitalPinToInterrupt(SENSORCONTROLLER_CS));
 
-    // and set collection state variable to 1 (package metadata)
-    i2cCollectionState = 1;
+    // set simbRequestFlag true
+    simbRequestFlag = true;
   }
 }
 
+void init_I2C(int dataSize) {
+
+  DATA_SIZE = dataSize;
+
+  // Initialize I2C comms as slave
+  Wire.begin(SLAVE_ADDR);
+
+  // Function to run when data requested from master
+  Wire.onRequest(requestEvent);
+
+  // pull the chip select pin down
+  pinMode(SENSORCONTROLLER_CS,INPUT_PULLDOWN);
 
 
+  SerialUSB.println("Sensor controller initiated, waiting for SIMB to initialize");
+  //TODO: don't wait for SIMB to initialize
+  // wait around until SIMB gives us the go ahead by shifting the chip select high
+  while(digitalRead(SENSORCONTROLLER_CS) == LOW) {
+  }
 
+  SerialUSB.println("SIMB activated, attaching interrupt");
+
+  // pull up the chip select pin
+  pinMode(SENSORCONTROLLER_CS,INPUT_PULLUP);
+
+  // delay for a moment
+  delay(10);
+
+  // then attach an interrupt to trigger on a low pin
+  attachInterrupt(digitalPinToInterrupt(SENSORCONTROLLER_CS), simbInterruptHandler, LOW);
+}
+
+// function to check if the simb has asked for data
+bool simbRequestedData() {
+  return simbRequestFlag;
+}
+
+// function to send data over to simb.
+void sendDataToSimb() {
+
+  // declare a pointer for the data
+  char* data;
+
+  // collect the data into the pointer
+  dataFile_getData(data);
+
+  // reset our num bytes left to send
+  int n_bytesLeftToSendSIMB = DATA_SIZE;
+
+  SerialUSB.print("SIMB requested data size. We have ");
+  SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
+  SerialUSB.println(" bytes to send. Packaging value and standing by.");
+
+  // switch to i2cCollectionState 2 (data packing)
+  i2cCollectionState = 2;
+
+  // while we haven't sent all the data
+  while (i2cCollectionState != -1) {
+
+    // switch on the i2cCollectionState variable
+    switch(i2cCollectionState) {
+
+      // standby
+      // waiting for a data request from simb
+      case 1:
+      break; // do nothing. handled in ISR.
+
+      // data packing
+      // simb has requested data. package the data and move back to standby
+      case 2:
+
+      // if we have more data than the max packet size
+      if (n_bytesLeftToSendSIMB > MAX_PACKET_SIZE) {
+
+        // send the max amount of data
+        currI2cPacketSize = MAX_PACKET_SIZE;
+
+      } else { // otherwise
+
+        // send the data we have left
+        currI2cPacketSize = n_bytesLeftToSendSIMB;
+
+        // set collection state to 0 (pre-sleep) since we'll be done sending data after this
+        i2cCollectionState = 0;
+      }
+
+      // figure out where our current data starts and stops
+      int startIndex = sizeof(data) - n_bytesLeftToSendSIMB;
+      int endIndex = startIndex + currI2cPacketSize - 1;
+
+      // copy all of the data in
+      for (int i=startIndex; i<=endIndex; i++){
+        i2cSendBuf[i-startIndex] = data[i];
+      }
+
+      // and update n_bytesLeftToSendSIMB
+      n_bytesLeftToSendSIMB = sizeof(data) - endIndex - 1;
+
+      // add a null terminator to the buffer
+      i2cSendBuf[currI2cPacketSize] = '\0';
+
+      // preview print
+      SerialUSB.print("SIMB has requested data. Packaging: ");
+      SerialUSB.println((char*) i2cSendBuf);
+
+      // print how much we have left to send
+      SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
+      SerialUSB.println(" bytes left to send.");
+
+      // if we're not supposed to go to sleep
+      if (i2cCollectionState == 2) {
+        // go back into standby, wait for request event
+        i2cCollectionState = 1;
+      }
+      break;
+    }
+  }
+
+  // now that we're done sending data, reattach our chip select interrupt
+  attachInterrupt(digitalPinToInterrupt(SENSORCONTROLLER_CS), simbInterruptHandler, LOW);
+}
 
 #endif
