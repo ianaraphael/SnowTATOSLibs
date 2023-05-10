@@ -99,8 +99,8 @@ public:
       if (!(this->sensors.getAddress(addresses[i], i))) {
 
         // print error
-        SerialUSB.print("Couldn't find sensor at index ");
-        SerialUSB.println(SerialUSB.print(i), DEC);
+        Serial.print("Couldn't find sensor at index ");
+        Serial.println(Serial.print(i), DEC);
       }
     }
 

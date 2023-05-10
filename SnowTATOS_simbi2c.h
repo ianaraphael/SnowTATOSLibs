@@ -21,11 +21,8 @@ ian.a.raphael.th@dartmouth.edu
 
 #define Serial SerialUSB // comment out if not using rocketscream board
 
-// init i2c communications with sensor controller as a controller
-void init_I2C_simbSide() {
-
-  // init i2c as master
-  Wire.begin();
+// sets pin mode for i2c chip select
+void init_sensorController_simbSide() {
 
   // set pin mode for sensor controller chip select and write it high (active low)
   pinMode(SENSORCONTROLLER_CS,INPUT_PULLUP);
