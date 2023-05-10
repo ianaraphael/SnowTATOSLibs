@@ -19,9 +19,10 @@ ian.a.raphael.th@dartmouth.edu
 #define CS_DELAY 10 // number of milliseconds to wait with chip select pin low
 #define DATA_SIZE 68 // agreed upon data size
 
+#define Serial SerialUSB // comment out if not using rocketscream board
 
 // init i2c communications with sensor controller as a controller
-void init_I2C_simbSide(int dataSize) {
+void init_I2C_simbSide() {
 
   // init i2c as master
   Wire.begin();
@@ -34,7 +35,7 @@ void init_I2C_simbSide(int dataSize) {
 
 void alertSensorController(){
 
-  SerialUSB.println("Requesting data from sensor controller");
+  Serial.println("Requesting data from sensor controller");
 
   // write sc chip select low (active) to wake up SC and say we're going to ask for data
   digitalWrite(SENSORCONTROLLER_CS,LOW);
@@ -72,13 +73,13 @@ void getDataFromSensorController(char *dataBuf) {
       currPacketSize = n_dataToGet;
     }
 
-    SerialUSB.print("We expect this many bytes from SC: ");
-    SerialUSB.println(currPacketSize,DEC);
+    Serial.print("We expect this many bytes from SC: ");
+    Serial.println(currPacketSize,DEC);
 
     // ask the SC to put the data on the wire
-    SerialUSB.print("SC put this many bytes on the wire: ");
+    Serial.print("SC put this many bytes on the wire: ");
     int nBytesCurrPacket = Wire.requestFrom(SENSORCONTROLLER_ADDRESS,currPacketSize);
-    SerialUSB.println(nBytesCurrPacket,DEC);
+    Serial.println(nBytesCurrPacket,DEC);
 
     // counter variable to track where we are in the current data packet
     int i_currPacket = 0;
