@@ -74,7 +74,7 @@ public:
 
     if (!pingerBus->available()) {
       // print error
-      Serial.println("Error opening snow pinger serial comms.");
+      SerialUSB.println("Error opening snow pinger serial comms.");
     }
 
     // now create the data filename
@@ -212,7 +212,7 @@ public:
         // set readstring to NaN
         readString += "NaN";
 
-        Serial.println("Failed to get req'd samples.");
+        SerialUSB.println("Failed to get req'd samples.");
 
       } else {
 

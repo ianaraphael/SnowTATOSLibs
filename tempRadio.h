@@ -19,7 +19,7 @@
 #define SERVER_ADDRESS 0 // server address always 0
 
 #define MAX_TRANSMISSION_ATTEMPTS 3 // maximumum number of times to attempt transmission per sampling cycle
-#define RADIO_TIMEOUT 5000 // five seconds
+#define RADIO_TIMEOUT 20000 // twenty seconds
 #define TIMEOUT 20000 // max wait time for radio transmissions in ms
 #define RADIO_FREQ 915.0 // radio frequency
 #define RADIO_POWER 23 // max power
@@ -49,7 +49,7 @@ void init_Radio() {
   driver.setFrequency(RADIO_FREQ);
 
   // print surccess
-  Serial.println("Client radio initialized successfully");
+  SerialUSB.println("Client radio initialized successfully");
 }
 
 
@@ -80,7 +80,7 @@ void sendData_fromClient(String filename) {
 
   do {
 
-    Serial.println("Attempting to send a message to the server");
+    SerialUSB.println("Attempting to send a message to the server");
 
     // manager.sendtoWait((uint8_t*) dataString.c_str(), dataString.length()+1, SERVER_ADDRESS))
 
@@ -93,21 +93,21 @@ void sendData_fromClient(String filename) {
       // Now wait for the reply from the server telling us how much of the data file it has
       uint8_t len = sizeof(buf);
       uint8_t from;
-      if (manager.recvfromAckTimeout(buf, &len, TIMEOUT, &from)) {
+      if (manager.recvfromAckTimeout(buf, &len, RADIO_TIMEOUT, &from)) {
 
         // print the server reply
         // strcpy(msg, (char*)buf);
         // strcat(msg, " ");
         // convert to an integer
         // unsigned long serverFileLength = *msg;
-        Serial.print("Received a handshake from server with length: ");
-        Serial.println(len,DEC);
-        Serial.println("");
+        SerialUSB.print("Received a handshake from server with length: ");
+        SerialUSB.println(len,DEC);
+        SerialUSB.println("");
 
         unsigned long serverFileLength = *(unsigned long*)buf;
 
-        Serial.print("Server file length: ");
-        Serial.println(serverFileLength, DEC);
+        SerialUSB.print("Server file length: ");
+        SerialUSB.println(serverFileLength, DEC);
 
         // open the file for reading
         File dataFile = openFile_read(filename);
@@ -118,13 +118,13 @@ void sendData_fromClient(String filename) {
           // get the file length
           unsigned long stationFileLength = getFileSize(filename);
 
-          Serial.print("Station file length: ");
-          Serial.println(stationFileLength, DEC);
+          SerialUSB.print("Station file length: ");
+          SerialUSB.println(stationFileLength, DEC);
 
           // if the file is longer than what the server has
           if (serverFileLength < stationFileLength) {
 
-            Serial.println("Sending: ");
+            SerialUSB.println("Sending: ");
 
             // seek to that point in the file
             seekToPoint(dataFile,serverFileLength);
@@ -147,9 +147,9 @@ void sendData_fromClient(String filename) {
               int numBytesRead = readFileBytes(dataFile, &sendBuf[1], sendLength-1);
 
               // print the data that we're going to send
-              // Serial.println("Sending the following data to the server: ");
-              Serial.print((char*) sendBuf);
-              // Serial.println("");
+              // SerialUSB.println("Sending the following data to the server: ");
+              SerialUSB.print((char*) sendBuf);
+              // SerialUSB.println("");
 
               // send the data to the server
               manager.sendtoWait((uint8_t*) sendBuf, sendLength, SERVER_ADDRESS);
@@ -171,7 +171,7 @@ void sendData_fromClient(String filename) {
 
         // in this case, the server received a message but we haven't gotten a
         // handshake back. the server is busy with another client. try again later
-        Serial.println("Server's busy, gonna wait a few seconds.");
+        SerialUSB.println("Server's busy, gonna wait a few seconds.");
 
         // increment the number of attempts we've made
         nTransmissionAttempts++;
@@ -187,7 +187,7 @@ void sendData_fromClient(String filename) {
     else {
       // in this case, the server did not recieve the message. we'll try again at
       // the next sampling instance.
-      Serial.println("Server failed to acknowledge receipt");
+      SerialUSB.println("Server failed to acknowledge receipt");
       break;
     }
 

@@ -75,7 +75,7 @@ bool init_RTC() {
     rtc.setDate(dateArray[3], dateArray[2], dateArray[1]);
 
   } else { // if failed, hang
-    Serial.println("failed to init RTC");
+    SerialUSB.println("failed to init RTC");
     while (1);
   }
 }

@@ -1,6 +1,6 @@
 /*
 
-A library to deal with i2c comms between SnowTATOS sensor controller and simb
+A library to deal with SC side i2c comms between SnowTATOS sensor controller and simb
 
 Ian Raphael
 2023.05.04
@@ -14,10 +14,9 @@ ian.a.raphael.th@dartmouth.edu
 #include <Wire.h>
 #include "dataFile.h"
 
-#define SLAVE_ADDR 9 // Define sensor controller (SC) I2C Address
-#define MAX_PACKET_SIZE 32 // define
-#define SENSORCONTROLLER_CS 6 // chip select
-volatile int DATA_SIZE;
+#define SENSORCONTROLLER_ADDRESS 9 // Define sensor controller (SC) I2C Address
+#define MAX_PACKET_SIZE 32 // maximum dataframe size
+#define SENSORCONTROLLER_CS 7 // chip select on SC side
 
 // collection state variable to keep track of what information we've sent to the
 // simb.
@@ -34,6 +33,7 @@ volatile int i2cCollectionState = -1;
 volatile bool simbRequestFlag = false; // indicates that the simb has requested data from us
 volatile uint8_t i2cSendBuf[MAX_PACKET_SIZE+1]; // add one byte for a null terminator so that we can print on this side. not for transmission.
 volatile uint16_t currI2cPacketSize;
+volatile int DATA_SIZE; // size of the data that the simb expects
 
 // service routine for getting a Wire data request from the SIMB. Puts the requested
 // data on the line
@@ -73,12 +73,14 @@ void simbInterruptHandler(void) {
   }
 }
 
-void init_I2C(int dataSize) {
+
+// init fx for setting up i2c on sensor controller side
+void init_I2C_scSide(int dataSize) {
 
   DATA_SIZE = dataSize;
 
   // Initialize I2C comms as slave
-  Wire.begin(SLAVE_ADDR);
+  Wire.begin(SENSORCONTROLLER_ADDRESS);
 
   // Function to run when data requested from master
   Wire.onRequest(requestEvent);
@@ -87,13 +89,13 @@ void init_I2C(int dataSize) {
   pinMode(SENSORCONTROLLER_CS,INPUT_PULLDOWN);
 
 
-  SerialUSB.println("Sensor controller initiated, waiting for SIMB to initialize");
-  //TODO: don't wait for SIMB to initialize
-  // wait around until SIMB gives us the go ahead by shifting the chip select high
-  while(digitalRead(SENSORCONTROLLER_CS) == LOW) {
-  }
-
-  SerialUSB.println("SIMB activated, attaching interrupt");
+  // SerialUSB.println("Sensor controller initiated, waiting for SIMB to initialize");
+  // //TODO: don't wait for SIMB to initialize
+  // // wait around until SIMB gives us the go ahead by shifting the chip select high
+  // while(digitalRead(SENSORCONTROLLER_CS) == LOW) {
+  // }
+  //
+  // SerialUSB.println("SIMB activated, attaching interrupt");
 
   // pull up the chip select pin
   pinMode(SENSORCONTROLLER_CS,INPUT_PULLUP);
@@ -113,10 +115,10 @@ bool simbRequestedData() {
 // function to send data over to simb.
 void sendDataToSimb() {
 
-  // declare a pointer for the data
-  char* data;
+  // allocate a buffer to hold the data
+  char data[DATA_SIZE];
 
-  // collect the data into the pointer
+  // collect the data into the buffer
   dataFile_getData(data);
 
   // reset our num bytes left to send
@@ -124,7 +126,7 @@ void sendDataToSimb() {
 
   SerialUSB.print("SIMB requested data size. We have ");
   SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
-  SerialUSB.println(" bytes to send. Packaging value and standing by.");
+  SerialUSB.println(" bytes to send. Packaging data and standing by.");
 
   // switch to i2cCollectionState 2 (data packing)
   i2cCollectionState = 2;
@@ -160,7 +162,7 @@ void sendDataToSimb() {
       }
 
       // figure out where our current data starts and stops
-      int startIndex = sizeof(data) - n_bytesLeftToSendSIMB;
+      int startIndex = DATA_SIZE - n_bytesLeftToSendSIMB;
       int endIndex = startIndex + currI2cPacketSize - 1;
 
       // copy all of the data in
@@ -169,7 +171,7 @@ void sendDataToSimb() {
       }
 
       // and update n_bytesLeftToSendSIMB
-      n_bytesLeftToSendSIMB = sizeof(data) - endIndex - 1;
+      n_bytesLeftToSendSIMB = DATA_SIZE - endIndex - 1;
 
       // add a null terminator to the buffer
       i2cSendBuf[currI2cPacketSize] = '\0';

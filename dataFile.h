@@ -60,8 +60,8 @@ void newFile(String filename, String* headerInformation, int numHeaderLines) {
   // if the file doesn't already exist
   if (!SD.exists(filename)) {
 
-    Serial.print("Creating datafile: ");
-    Serial.println(filename);
+    SerialUSB.print("Creating datafile: ");
+    SerialUSB.println(filename);
 
     File dataFile = openFile_write(filename);
 
@@ -75,7 +75,7 @@ void newFile(String filename, String* headerInformation, int numHeaderLines) {
         dataFile.println(headerInformation[i]);
 
         // also print to serial to confirm
-        Serial.println(headerInformation[i]);
+        SerialUSB.println(headerInformation[i]);
       }
 
       // close the file
@@ -165,14 +165,21 @@ function for getting the first line of data from every file stored by the sensor
 controller. does NOT check buffer size, file contents, etc. just reads in data
 from each file until it hits a new line.
 */
-char* dataFile_getData(char* dataPointer) {
+void dataFile_getData(char* dataBuf) {
+
+  // allocate a buffer that
   // for every file in the directory
     // read the first line into the buffer
 
+  // return the buffer
+
+  // for now, allocate test data
   char testData[] = "Hello this is a really long message that won't fit into one packet.";
 
-  // return the buffer
-  dataPointer = testData;
+  // copy it into the external array
+  for (int i=0;i<sizeof(testData);i++) {
+    dataBuf[i] = testData[i];
+  }
 }
 
 
@@ -193,7 +200,7 @@ void init_SD() {
   SD.begin(SD_CS);
   delay(2000);
   if (!SD.begin(SD_CS)) {
-    Serial.println("SD initialization failed!");
+    SerialUSB.println("SD initialization failed!");
   }
 }
 
