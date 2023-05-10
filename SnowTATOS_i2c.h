@@ -16,7 +16,7 @@ ian.a.raphael.th@dartmouth.edu
 
 #define SENSORCONTROLLER_ADDRESS 9 // Define sensor controller (SC) I2C Address
 #define MAX_PACKET_SIZE 32 // maximum dataframe size
-#define SENSORCONTROLLER_CS 7 // chip select on SC side
+#define SENSORCONTROLLER_CS 6 // chip select on SC side
 
 // collection state variable to keep track of what information we've sent to the
 // simb.
