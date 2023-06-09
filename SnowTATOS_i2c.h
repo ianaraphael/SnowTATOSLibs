@@ -113,13 +113,15 @@ bool simbRequestedData() {
 }
 
 // function to send data over to simb.
-void sendDataToSimb() {
+void sendDataToSimb(uint8_t *simbData) {
 
-  // allocate a buffer to hold the data
-  char data[DATA_SIZE];
+  // // allocate a buffer to hold the data
+  // char data[DATA_SIZE];
+  //
+  // // collect the data into the buffer
+  // dataFile_getData(data);
 
-  // collect the data into the buffer
-  dataFile_getData(data);
+  char *data = simbData;
 
   // reset our num bytes left to send
   int n_bytesLeftToSendSIMB = DATA_SIZE;

@@ -15,7 +15,14 @@
 #define STATION_ID SERVER_ADDRESS // our station id is the server address (0)
 // size of the data that simb expects over i2c for transmission. fx of individual
 // sample size, number of stations, sampling frequency, transmit frequency
-#define I2C_DATASIZE 68
+#define SIMB_DATASIZE 60
+
+// declare a buffer to hold simb data
+uint8_t simbData[SIMB_DATASIZE];
+
+String masterFileName = "master.txt";
+
+#define AWAKE_PERIOD 10 // number of minutes to stay awake during active period
 
 const int flashChipSelect = 4;
 

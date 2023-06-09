@@ -5,6 +5,10 @@
 #include <RTCZero.h>
 
 RTCZero rtc; // real time clock object
+// uint8_t SAMPLING_INTERVAL_MIN = 240; // four hour sampling
+uint8_t SAMPLING_INTERVAL_MIN = 1; // one minute sampling
+uint8_t ALARM_MINUTES = 0; // minute to sample on
+uint8_t AWAKE_PERIOD = 10; // number of minutes to stay awake
 
 /************ getTime() ************/
 /*
@@ -108,7 +112,6 @@ String getDateString(void) {
 
   // return the datestring
   return dateString;
-}
 
 /************ getTimeString() ************/
 /*

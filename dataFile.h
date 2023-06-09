@@ -165,23 +165,99 @@ function for getting the first line of data from every file stored by the sensor
 controller. does NOT check buffer size, file contents, etc. just reads in data
 from each file until it hits a new line.
 */
-void dataFile_getData(char* dataBuf) {
+void dataFile_getAllData(char* dataBuf,String filename) {
 
-  // allocate a buffer that
-  // for every file in the directory
-    // read the first line into the buffer
+  // get the file size
+  unsigned long fileSize = getFileSize(filename);
 
-  // return the buffer
+  // open the file for reading
+  File dataFile = openFile_read(filename);
 
-  // for now, allocate test data
-  char testData[] = "Hello this is a really long message that won't fit into one packet.";
-
-  // copy it into the external array
-  for (int i=0;i<sizeof(testData);i++) {
-    dataBuf[i] = testData[i];
-  }
+  // read all of the data into the buffer
+  readFileBytes(dataFile, dataBuf, fileSize);
+  //
+  // // for now, allocate test data
+  // char testData[] = "Hello this is a really long message that won't fit into one packet.";
+  //
+  // // copy it into the external array
+  // for (int i=0;i<sizeof(testData);i++) {
+  //   dataBuf[i] = testData[i];
+  // }
 }
 
+void getNewestData(char* simbDataBuf, String filename) {
+
+  // parse the filename for pinger vs. temp
+  int index = filename.indexof('_');
+  ind
+  // parse the filename for station number
+
+  // get the file size
+  unsigned long fileSize = getFileSize(filename);
+
+  // open the file
+  File dataFile = openFile_read(filename);
+
+  // seek to the end
+  seekToPoint(dataFile, fileSize);
+
+  // allocate a counter starting two chars before the end (to avoid the ending
+  // newline chars)
+  int i = fileSize-2;
+
+  // now start reading backwards
+  for (i;i>=0;i--){
+
+    // seek to the new char
+    seekToPoint(dataFile,i);
+
+    // if it's a new line character
+    if (dataFile.peek() == '\n') {
+      // break out of the loop
+      break;
+    }
+  }
+
+  // seek forward one char
+  seekToPoint(dataFile,i+1);
+
+  // allocate a buffer to hold the data
+  // (right now making it 100 but it should be the size of whatever data we
+  // are supposed to be reading)
+  char *temporaryBuffer[100];
+
+  // now for every byte after the newline
+  for (i;i<fileSize;i++) {
+
+    // read the byte
+    uint8_t holdChar = dataFile.read();
+
+    // if it's a newline or a carriage return
+    if (holdChar == '\r' || (holdChar == '\n') {
+
+      // that's the end of our line. write a terminating character
+      temporaryBuffer[i] = '\0';
+
+      // then break out of the loop
+      break;
+    }
+
+    // otherwise writ the char to the buffer
+    temporaryBuffer[i] = holdChar;
+  }
+
+  // close the file
+  closeFile(dataFile);
+
+  // if it's temp
+    // parse the temp data and write to the correct location
+
+  // if it's pinger
+    // parse the pinger data and write to the correct location
+
+  // if there isn't a timestamp in the buffer already
+    // parse the timestamp and write it to the correct location
+}
 
 
 /************ init_SD ************/
