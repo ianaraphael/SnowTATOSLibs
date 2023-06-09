@@ -126,12 +126,12 @@ public:
     }
     headerInformation[2] += "}";
 
-    headerInformation[3] = "Date, Time";
+    headerInformation[3] = "Date,Time";
     // for every sensor in the array
     for (int i = 0; i < numSensors; i++) {
 
       // add a header column for each sensor
-      headerInformation[3] += ", Sensor";
+      headerInformation[3] += ",Sensor";
       headerInformation[3] += i + 1;
       headerInformation[3] += " [°C]";
     }
@@ -164,13 +164,13 @@ public:
     String readString = "";
 
     // throw the timestamp on there
-    readString = date + ", " + time;
+    readString = date + "," + time;
 
     // for every sensor on the line
     for (int i = 0; i < numSensors; i++) {
 
       // add its data to the string
-      readString += ", ";
+      readString += ",";
       readString += this->sensors.getTempC(addresses[i]);
     }
 

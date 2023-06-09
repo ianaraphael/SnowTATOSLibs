@@ -187,10 +187,12 @@ void dataFile_getAllData(char* dataBuf,String filename) {
 
 void getNewestData(char* simbDataBuf, String filename) {
 
-  // parse the filename for pinger vs. temp
+  // determine whether it's a pinger or a temp file
   int index = filename.indexof('_');
-  ind
-  // parse the filename for station number
+  char sensorType = filename[index+1];
+
+  // get the stn number (index is 3: STN#_P.txt)
+  int stnID = toInt(filename[3]);
 
   // get the file size
   unsigned long fileSize = getFileSize(filename);
@@ -242,21 +244,62 @@ void getNewestData(char* simbDataBuf, String filename) {
       break;
     }
 
-    // otherwise writ the char to the buffer
+    // otherwise write the char to the buffer
     temporaryBuffer[i] = holdChar;
   }
 
   // close the file
   closeFile(dataFile);
 
-  // if it's temp
-    // parse the temp data and write to the correct location
+  // tokenize the data
+  char *delimiter = ",";
 
-  // if it's pinger
-    // parse the pinger data and write to the correct location
+  // first get the datestamp
+  char *dateStamp = strtok(temporaryBuffer,delimiter);
+
+  // then the timestamp
+  char *timeStamp = strtok(NULL,delimiter);;
+
+  // now, if it's temp data
+  if (sensorType == 'T') {
+
+    // get the first bit of data
+    char *currTempData = strtok(NULL,delimiter);
+
+    do {
+
+      // write the data to the correct location in the simb buffer
+
+      // get the next bit of data
+      currTempData = strtok(NULL,delimiter);
+
+      // until we reach the end
+    } while (currTempData != NULL);
+
+    // if it's pinger data
+  } else if (sensorType == 'P') {
+
+    // get the pinger data
+    char *pingerData = strtok(NULL,delimiter);
+
+    // and write it to the correct location in the simb buffer
+
+  }
 
   // if there isn't a timestamp in the buffer already
+  if () {
     // parse the timestamp and write it to the correct location
+
+    // first set local time
+    // hour, min, sec, day, month, year
+    setTime(currHour, 00, 00, currMonth, currDay, currYear);
+
+    // get the elapsed seconds since start time
+    time_t elapsedSeconds = now() - START_TIME_UNIX;
+
+    // convert to decimal days
+    double elapsedDays = (double)elapsedSeconds/(double)86400;
+  }
 }
 
 

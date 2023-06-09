@@ -90,8 +90,8 @@ public:
     headerInformation[1] = "Station ID: ";
     headerInformation[1] += stationID;
 
-    headerInformation[2] = "Date, Time";
-    headerInformation[2] += ", Snow pinger range [cm]";
+    headerInformation[2] = "Date,Time";
+    headerInformation[2] += ",Snow pinger range [cm]";
 
     // create a new file
     newFile(filename,headerInformation,numHeaderLines);
@@ -119,10 +119,10 @@ public:
     String readString = "";
 
     // throw the timestamp on there
-    readString = date + ", " + time;
+    readString = date + "," + time;
 
     // add our comma
-    readString += ", ";
+    readString += ",";
 
     // query the pinger
     if (pingerBus->available()) {
