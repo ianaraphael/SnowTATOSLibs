@@ -273,7 +273,7 @@ void getNewestData(char* simbDataBuf, String filename) {
       // get the next bit of data
       currTempData = strtok(NULL,delimiter);
 
-      // until we reach the end
+      // if the next bit of data is null, break the loop
     } while (currTempData != NULL);
 
     // if it's pinger data
@@ -288,17 +288,33 @@ void getNewestData(char* simbDataBuf, String filename) {
 
   // if there isn't a timestamp in the buffer already
   if () {
-    // parse the timestamp and write it to the correct location
 
-    // first set local time
+    // parse the datestamp
+    uint16_t *currYear = strtok(dateStamp,".");
+    uint16_t *currMonth = strtok(NULL,".");
+    uint16_t *currDay strtok(NULL,".");
+
+    // parse the timestamp
+    uint16_t *currHour= strtok(timeStamp,":");
+    uint16_t *currMinute = strtok(NULL,":");
+    uint16_t *currSecond = strtok(NULL,":");
+
+    // now set the local time
     // hour, min, sec, day, month, year
-    setTime(currHour, 00, 00, currMonth, currDay, currYear);
+    setTime(currHour, currMinute, 00, currMonth, currDay, currYear);
 
     // get the elapsed seconds since start time
     time_t elapsedSeconds = now() - START_TIME_UNIX;
 
-    // convert to decimal days
-    double elapsedDays = (double)elapsedSeconds/(double)86400;
+    // convert to decimal days, multiplied by 100 and floored automatically
+    // by integer math. we will recover this to days and hours later as:
+    // recoveredDecimalDays = (elapsedDecimalDays_multHundred)/100
+    // days = floor(recoveredDecimalDays)
+    // hours = round(recoveredDecimalDays - days)*24
+    uint16_t elapsedDecimalDays_multHundred = elapsedSeconds/864;
+
+    // now write to the buffer
+
   }
 }
 
