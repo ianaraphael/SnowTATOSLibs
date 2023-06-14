@@ -33,7 +33,6 @@ volatile int i2cCollectionState = -1;
 volatile bool simbRequestFlag = false; // indicates that the simb has requested data from us
 volatile uint8_t i2cSendBuf[MAX_PACKET_SIZE+1]; // add one byte for a null terminator so that we can print on this side. not for transmission.
 volatile uint16_t currI2cPacketSize;
-volatile int DATA_SIZE; // size of the data that the simb expects
 
 // service routine for getting a Wire data request from the SIMB. Puts the requested
 // data on the line
@@ -75,9 +74,7 @@ void simbInterruptHandler(void) {
 
 
 // init fx for setting up i2c on sensor controller side
-void init_I2C_scSide(int dataSize) {
-
-  DATA_SIZE = dataSize;
+void init_I2C_scSide() {
 
   // Initialize I2C comms as slave
   Wire.begin(SENSORCONTROLLER_ADDRESS);
@@ -116,15 +113,15 @@ bool simbRequestedData() {
 void sendDataToSimb(uint8_t *simbData) {
 
   // // allocate a buffer to hold the data
-  // char data[DATA_SIZE];
+  // char data[SIMB_DATASIZE];
   //
   // // collect the data into the buffer
   // dataFile_getData(data);
 
-  char *data = simbData;
+  uint8_t* data = simbData;
 
   // reset our num bytes left to send
-  int n_bytesLeftToSendSIMB = DATA_SIZE;
+  int n_bytesLeftToSendSIMB = SIMB_DATASIZE;
 
   SerialUSB.print("SIMB requested data size. We have ");
   SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
@@ -164,7 +161,7 @@ void sendDataToSimb(uint8_t *simbData) {
       }
 
       // figure out where our current data starts and stops
-      int startIndex = DATA_SIZE - n_bytesLeftToSendSIMB;
+      int startIndex = SIMB_DATASIZE - n_bytesLeftToSendSIMB;
       int endIndex = startIndex + currI2cPacketSize - 1;
 
       // copy all of the data in
@@ -173,7 +170,7 @@ void sendDataToSimb(uint8_t *simbData) {
       }
 
       // and update n_bytesLeftToSendSIMB
-      n_bytesLeftToSendSIMB = DATA_SIZE - endIndex - 1;
+      n_bytesLeftToSendSIMB = SIMB_DATASIZE - endIndex - 1;
 
       // add a null terminator to the buffer
       i2cSendBuf[currI2cPacketSize] = '\0';

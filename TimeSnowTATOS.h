@@ -112,6 +112,7 @@ String getDateString(void) {
 
   // return the datestring
   return dateString;
+}
 
 /************ getTimeString() ************/
 /*

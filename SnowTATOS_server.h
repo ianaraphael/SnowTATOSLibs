@@ -18,12 +18,10 @@
 #define SIMB_DATASIZE 60
 
 // start time as a unix timestamp (seconds)
-#define START_TIME_UNIX
+#define START_TIME_UNIX 10000
 
 // declare a buffer to hold simb data
 uint8_t simbData[SIMB_DATASIZE];
-
-#define AWAKE_PERIOD 10 // number of minutes to stay awake during active period
 
 const int flashChipSelect = 4;
 
@@ -32,13 +30,12 @@ const int flashChipSelect = 4;
 #include "TimeSnowTATOS.h"
 #include <SerialFlash.h>
 #include "SnowTATOS_i2c.h"
-#include <TimeLib.h>
-
-// declare a global to keep track of initial time
-time_t startTime;
 
 /************ Board setup ************/
 void boardSetup() {
+
+  // set the simb buffer to all zeros
+  memset(simbData,0, sizeof(simbData));
 
   unsigned char pinNumber;
 

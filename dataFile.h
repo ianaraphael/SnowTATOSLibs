@@ -14,7 +14,7 @@
 #define dataFile_h
 
 #include "SD.h"
-
+#include "TimeSnowTATOS.h"
 
 // SD card pins
 #define SD_CS 10 // SD card chip select
@@ -159,40 +159,41 @@ int readFileBytes(File dataFile, uint8_t* buffer, int numBytesToRead) {
   return numBytesRead;
 }
 
-/************ dataFile_getData ************/
-/*
-function for getting the first line of data from every file stored by the sensor.
-controller. does NOT check buffer size, file contents, etc. just reads in data
-from each file until it hits a new line.
-*/
-void dataFile_getAllData(char* dataBuf,String filename) {
-
-  // get the file size
-  unsigned long fileSize = getFileSize(filename);
-
-  // open the file for reading
-  File dataFile = openFile_read(filename);
-
-  // read all of the data into the buffer
-  readFileBytes(dataFile, dataBuf, fileSize);
-  //
-  // // for now, allocate test data
-  // char testData[] = "Hello this is a really long message that won't fit into one packet.";
-  //
-  // // copy it into the external array
-  // for (int i=0;i<sizeof(testData);i++) {
-  //   dataBuf[i] = testData[i];
-  // }
-}
+// /************ dataFile_getData ************/
+// /*
+// function for getting the first line of data from every file stored by the sensor.
+// controller. does NOT check buffer size, file contents, etc. just reads in data
+// from each file until it hits a new line.
+// */
+// void dataFile_getAllData(char* dataBuf,String filename) {
+//
+//   // get the file size
+//   unsigned long fileSize = getFileSize(filename);
+//
+//   // open the file for reading
+//   File dataFile = openFile_read(filename);
+//
+//   // read all of the data into the buffer
+//   readFileBytes(dataFile, dataBuf, fileSize);
+//   //
+//   // // for now, allocate test data
+//   // char testData[] = "Hello this is a really long message that won't fit into one packet.";
+//   //
+//   // // copy it into the external array
+//   // for (int i=0;i<sizeof(testData);i++) {
+//   //   dataBuf[i] = testData[i];
+//   // }
+// }
 
 void getNewestData(byte* simbDataBuf, String filename) {
 
   // determine whether it's a pinger or a temp file
-  int index = filename.indexof('_');
+  int index = filename.indexOf('_');
   char sensorType = filename[index+1];
 
   // get the stn number (index is 3: STN#_P.txt)
-  int stnID = toInt(filename[3]);
+  // https://stackoverflow.com/questions/439573/how-to-convert-a-single-char-into-an-int
+  int stnID = filename[3] - '0';
 
   // get the file size
   unsigned long fileSize = getFileSize(filename);
@@ -208,7 +209,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
   int i = fileSize-2;
 
   // now start reading backwards
-  for (i;i>=0;i--){
+  for (i;i>=0;i--) {
 
     // seek to the new char
     seekToPoint(dataFile,i);
@@ -226,7 +227,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
   // allocate a buffer to hold the data
   // (right now making it 100 but it should be the size of whatever data we
   // are supposed to be reading)
-  char *temporaryBuffer[100];
+  char temporaryBuffer[100];
 
   // now for every byte after the newline
   for (i;i<fileSize;i++) {
@@ -235,7 +236,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
     uint8_t holdChar = dataFile.read();
 
     // if it's a newline or a carriage return
-    if (holdChar == '\r' || (holdChar == '\n') {
+    if ((holdChar == '\r') || (holdChar == '\n')) {
 
       // that's the end of our line. write a terminating character
       temporaryBuffer[i] = '\0';
@@ -261,7 +262,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
   char *timeStamp = strtok(NULL,delimiter);
 
   // allocate an int to keep track of where the data starts for this station
-  int startByte = ((stnID-1)* 11)+4)/2;
+  int startByte = (((stnID-1) * 11)+4)/2;
 
   // now, if it's temp data
   if (sensorType == 'T') {
@@ -274,7 +275,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
     char *temp2_char = strtok(NULL,delimiter);
     uint16_t temp2 = (atof(temp2_char)+56.0) * 67.0;
     char *temp3_char = strtok(NULL,delimiter);
-    uint16_t temp3 = (atof(temxp3_char)+56.0) * 67.0;
+    uint16_t temp3 = (atof(temp3_char)+56.0) * 67.0;
 
     // write the data to the correct location in the simb buffer
 
@@ -350,7 +351,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
       // pinger data is split across a byte boundary
 
       // high nibble of the pingerData goes in the low nibble of startByte + 4
-      byte byte1 = (simbDataBuf[startByte+4] & B11110000)) | (pingerData >> 4);
+      byte byte1 = (simbDataBuf[startByte+4] & B11110000) | (pingerData >> 4);
 
       // low nibble of pingerdata goes in the high nibble of start byte + 5
       byte byte2 = (pingerData << 4) | (simbDataBuf[startByte+5] & B00001111);
@@ -369,24 +370,24 @@ void getNewestData(byte* simbDataBuf, String filename) {
   }
 
   // get the timestamp out of the buffer
-  uint16_t timeStamp = (simbDataBuf[0] << 8) | (simbDataBuf[1] & 0x00ff);
+  uint16_t bufferTimestamp = (simbDataBuf[0] << 8) | (simbDataBuf[1] & 0x00ff);
 
   // if the timestamp is 0
-  if (timeStamp == 0) {
+  if (bufferTimestamp == 0) {
 
     // parse the datestamp
-    uint16_t *currYear = strtok(dateStamp,".");
-    uint16_t *currMonth = strtok(NULL,".");
-    uint16_t *currDay strtok(NULL,".");
+    uint8_t currYear = (uint8_t) atoi(strtok(dateStamp,"."));
+    uint8_t currMonth = atoi(strtok(NULL,"."));
+    uint8_t currDay = atoi(strtok(NULL,"."));
 
     // parse the timestamp
-    uint16_t *currHour= strtok(timeStamp,":");
-    uint16_t *currMinute = strtok(NULL,":");
-    uint16_t *currSecond = strtok(NULL,":");
+    uint8_t currHour = atoi(strtok(timeStamp,":"));
+    uint8_t currMinute = atoi(strtok(NULL,":"));
+    uint8_t currSecond = atoi(strtok(NULL,":"));
 
     // now set the local time
     // hour, min, sec, day, month, year
-    setTime(currHour, currMinute, 00, currMonth, currDay, currYear);
+    setTime(currHour, currMinute, 0, currMonth, currDay, currYear);
 
     // get the elapsed seconds since start time
     time_t elapsedSeconds = now() - START_TIME_UNIX;
@@ -402,6 +403,108 @@ void getNewestData(byte* simbDataBuf, String filename) {
     simbDataBuf[0] = highByte(elapsedDecimalDays_multHundred);
     simbDataBuf[1] = lowByte(elapsedDecimalDays_multHundred);
   }
+}
+
+// unpacks a pinger value from the simb buffer for the given station ID
+uint8_t unpackPingerData(byte* simbBuffer,uint8_t stnID){
+
+  // get the start byte
+  int startByte = (((stnID-1) * 11)+4)/2;
+
+  uint8_t pingerData;
+
+  // if it's an odd station
+  if (stationID%2 == 1){
+    // pinger data is split across a byte boundary
+    // high nibble of the data is in the low nibble of startByte+4
+    // low nibble of the data is in the high nibble of startByte+5
+    pingerData = (simbBuffer[startByte+4] << 4) | (simbBuffer[startByte+5] >> 4);
+
+    // otherwise it's an even station
+  } else {
+    // pinger data starts on a byte boundary
+    // extract it
+    pingerData = simbBuffer[startByte+5];
+
+  }
+
+  // return the value
+  return pingerData;
+}
+
+// unpacks the timestamp from the simb buffer
+float unpackTimestamp(byte* simbBuffer) {
+
+  // get the timestamp out of the buffer
+  uint16_t bufferTimestamp = (simbBuffer[0] << 8) | (simbBuffer[1] & 0x00ff);
+
+  // convert to decimal days after init time
+  // recoveredDecimalDays = (elapsedDecimalDays_multHundred)/100
+  // days = floor(recoveredDecimalDays)
+  // hours = round(recoveredDecimalDays - days)*24
+  float decimalDays = (bufferTimeStamp)/100.0;
+
+  // return as decimal days
+  return decimalDays;
+}
+
+// unpacks the three temp values from the simb buffer for the given station ID
+void unpackTempData(byte* simbBuffer,float* tempArray,uint8_t stnID) {
+
+  // get the start byte
+  int startByte = (((stnID-1) * 11)+4)/2;
+
+  // get the three temperatures and convert to unsigned int ((values+56.0) * 67)
+  // this pads the minimum temp reading of -55, and gives a max reading of ~+5 degrees
+  // without rollover for our twelve bits
+  char *temp1_char = strtok(NULL,delimiter);
+  uint16_t temp1 = (atof(temp1_char)+56.0) * 67.0;
+  char *temp2_char = strtok(NULL,delimiter);
+  uint16_t temp2 = (atof(temp2_char)+56.0) * 67.0;
+  char *temp3_char = strtok(NULL,delimiter);
+  uint16_t temp3 = (atof(temp3_char)+56.0) * 67.0;
+
+  uint16_t temp1;
+  uint16_t temp2;
+  uint16_t temp3;
+
+  // if it's an odd station
+  if (stnID%2 == 1) {
+
+    // low nibble of the high byte of data is the high nibble of the startByte in the array
+    // low byte is the low nibble of the first byte and the high nibble of the second byte
+    byte hiByte = (simbBuffer[startByte] >> 4);
+    byte loByte = (simbBuffer[startByte] << 4) | (simbBuffer[startByte+1] >> 4);
+    temp1 = (hiByte << 8) | (loByte & 0x00ff);
+
+    hiByte = simbBuffer[startByte+1] & B00001111;
+    loByte = simbBuffer[startByte+2];
+    temp2 = (hiByte << 8) | (loByte & 0x00ff);
+
+    hiByte = simbBuffer[startByte+3] >> 4;
+    loByte = (simbBuffer[startByte+3] << 4) | (simbBuffer[startByte+4] >> 4);
+    temp3 = (hiByte << 8) | (loByte & 0x00ff);
+
+    // otherwise, if it's an even station
+  } else if (stnID%2 == 0) {
+
+    byte hiByte = (simbBuffer[startByte] & B00001111);
+    byte loByte = simbBuffer[startByte+1];
+    temp1 = (hiByte << 8) | (loByte & 0x00ff);
+
+    hiByte = (simbBuffer[startByte+2] >> 4);
+    loByte = (simbBuffer[startByte+2] << 4) | (simbBuffer[startByte+3] >> 4);
+    temp2 = (hiByte << 8) | (loByte & 0x00ff);
+
+    hiByte = (simbBuffer[startByte+3] & B00001111);
+    loByte = simbBuffer[startByte+4];
+    temp3 = (hiByte << 8) | (loByte & 0x00ff);
+  }
+
+  // now convert the temperatures back to celcius
+  tempArray[0] = (temp1/67.0)-56.0;
+  tempArray[1] = (temp2/67.0)-56.0;
+  tempArray[2] = (temp3/67.0)-56.0;
 }
 
 

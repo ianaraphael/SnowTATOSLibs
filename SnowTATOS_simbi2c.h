@@ -17,7 +17,7 @@ ian.a.raphael.th@dartmouth.edu
 #define MAX_PACKET_SIZE 32 // maximum dataframe size
 #define SENSORCONTROLLER_CS 6 // sensor controller chip select on simb side
 #define CS_DELAY 10 // number of milliseconds to wait with chip select pin low
-#define DATA_SIZE 68 // agreed upon data size
+#define DATA_SIZE 60 // agreed upon data size
 
 #define Serial SerialUSB // comment out if not using rocketscream board
 
