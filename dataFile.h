@@ -185,7 +185,7 @@ void dataFile_getAllData(char* dataBuf,String filename) {
   // }
 }
 
-void getNewestData(char* simbDataBuf, String filename) {
+void getNewestData(byte* simbDataBuf, String filename) {
 
   // determine whether it's a pinger or a temp file
   int index = filename.indexof('_');
@@ -258,36 +258,121 @@ void getNewestData(char* simbDataBuf, String filename) {
   char *dateStamp = strtok(temporaryBuffer,delimiter);
 
   // then the timestamp
-  char *timeStamp = strtok(NULL,delimiter);;
+  char *timeStamp = strtok(NULL,delimiter);
+
+  // allocate an int to keep track of where the data starts for this station
+  int startByte = ((stnID-1)* 11)+4)/2;
 
   // now, if it's temp data
   if (sensorType == 'T') {
 
-    // get the first bit of data
-    char *currTempData = strtok(NULL,delimiter);
+    // get the three temperatures and convert to unsigned int ((values+56.0) * 67)
+    // this pads the minimum temp reading of -55, and gives a max reading of ~+5 degrees
+    // without rollover for our twelve bits
+    char *temp1_char = strtok(NULL,delimiter);
+    uint16_t temp1 = (atof(temp1_char)+56.0) * 67.0;
+    char *temp2_char = strtok(NULL,delimiter);
+    uint16_t temp2 = (atof(temp2_char)+56.0) * 67.0;
+    char *temp3_char = strtok(NULL,delimiter);
+    uint16_t temp3 = (atof(temxp3_char)+56.0) * 67.0;
 
-    do {
+    // write the data to the correct location in the simb buffer
 
-      // write the data to the correct location in the simb buffer
+    // if it's an odd station
+    if (stnID%2 == 1) {
 
-      // get the next bit of data
-      currTempData = strtok(NULL,delimiter);
+      // byte1 is the low nibble of the high byte and the high nibble of the low byte of temp 1
+      // byte 1 = lowNybble(highByte(temp1)) + highNibble(lowByte(temp1))
+      byte byte1 = (highByte(temp1) << 4) | (lowByte(temp1) >> 4);
 
-      // if the next bit of data is null, break the loop
-    } while (currTempData != NULL);
+      // high nibble of the second byte is the low nibble of the low byte of temp 1.
+      // we'll just shift it into a high nibble.
+      byte byte2 = (lowByte(temp1) << 4);
+      // now the low nibble of byte2 is the low nibble of the high byte of temp 2
+      byte2 = byte2 | (highByte(temp2) & B00001111);
+
+      // byte 3 is the low byte of temp 2
+      byte byte3 = lowByte(temp2);
+
+      // byte4 is the low nibble of the high byte and the high nibble of the low byte of temp 3
+      byte byte4 = (highByte(temp3) << 4) | (lowByte(temp3) >> 4);
+
+      // byte5 is the low nibble of the lowbyte of temp3, shifted up 4 bits.
+      // we'll put the high byte of the pinger data in later
+      byte byte5 = (lowByte(temp3) << 4);
+
+      // write all of the data to the buffer
+      simbDataBuf[startByte] = byte1;
+      simbDataBuf[startByte+1] = byte2;
+      simbDataBuf[startByte+2] = byte3;
+      simbDataBuf[startByte+3] = byte4;
+      simbDataBuf[startByte+4] = byte5;
+
+      // otherwise, if it's an even station
+    } else if (stnID%2 == 0) {
+
+      // byte1 is the high nibble of startByte and the low nibble of the high byte of temp1
+      byte byte1 = (simbDataBuf[startByte] & B11110000) | (highByte(temp1) & B00001111);
+
+      // byte2 is the low byte of temp1
+      byte byte2 = lowByte(temp1);
+
+      // byte3 is the low nibble of the high byte and the high nibble of the low byte of temp2
+      byte byte3 = (highByte(temp2) << 4) | (lowByte(temp2) >> 4);
+
+      // byte4 is the low nibble of the low byte of temp 2 and the low nibble of the high byte of temp 3
+      byte byte4 = (lowByte(temp2) << 4) | (highByte(temp3) >> 4);
+
+      // byte5 the lowbyte of temp3
+      byte byte5 = lowByte(temp3);
+
+      // write all of the data to the buffer
+      simbDataBuf[startByte] = byte1;
+      simbDataBuf[startByte+1] = byte2;
+      simbDataBuf[startByte+2] = byte3;
+      simbDataBuf[startByte+3] = byte4;
+      simbDataBuf[startByte+4] = byte5;
+
+    }
 
     // if it's pinger data
   } else if (sensorType == 'P') {
 
     // get the pinger data
-    char *pingerData = strtok(NULL,delimiter);
+    char *pingerData_char = strtok(NULL,delimiter);
 
-    // and write it to the correct location in the simb buffer
+    // convert to an int
+    uint8_t pingerData = atoi(pingerData_char);
 
+    // if it's an odd station
+    if (stnID%2 == 1) {
+
+      // pinger data is split across a byte boundary
+
+      // high nibble of the pingerData goes in the low nibble of startByte + 4
+      byte byte1 = (simbDataBuf[startByte+4] & B11110000)) | (pingerData >> 4);
+
+      // low nibble of pingerdata goes in the high nibble of start byte + 5
+      byte byte2 = (pingerData << 4) | (simbDataBuf[startByte+5] & B00001111);
+
+      // put the data in the buffer
+      simbDataBuf[startByte+4] = byte1;
+      simbDataBuf[startByte+5] = byte2;
+
+      // otherwise, if it's an even station
+    } else if (stnID%2 == 0) {
+
+      // pinger data starts on a byte boundary.
+      // put it in the right spot
+      simbDataBuf[startByte+5] = pingerData;
+    }
   }
 
-  // if there isn't a timestamp in the buffer already
-  if () {
+  // get the timestamp out of the buffer
+  uint16_t timeStamp = (simbDataBuf[0] << 8) | (simbDataBuf[1] & 0x00ff);
+
+  // if the timestamp is 0
+  if (timeStamp == 0) {
 
     // parse the datestamp
     uint16_t *currYear = strtok(dateStamp,".");
@@ -314,7 +399,8 @@ void getNewestData(char* simbDataBuf, String filename) {
     uint16_t elapsedDecimalDays_multHundred = elapsedSeconds/864;
 
     // now write to the buffer
-
+    simbDataBuf[0] = highByte(elapsedDecimalDays_multHundred);
+    simbDataBuf[1] = lowByte(elapsedDecimalDays_multHundred);
   }
 }
 

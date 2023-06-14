@@ -85,12 +85,14 @@ public:
     // // and point the object's addresses attribute here
     // addresses = curr_addresses;
 
-
     pinMode(powerPin, OUTPUT);
     digitalWrite(powerPin , HIGH);
 
     // init temp sensors themselves
     this->sensors.begin();
+
+    // and set their resolution
+    this->sensors.setResolution(12);
 
     // for every sensor
     for (int i = 0; i < numSensors; i++) {
@@ -154,11 +156,20 @@ public:
     // write the power pin high
     digitalWrite(powerPin, HIGH);
 
+    // init the sensors
+    sensors.begin();
+
+    // and set resolution for everybody
+    sensors.setResolution(12);
+
     // delay for a second
     delay(1000);
 
     // Call sensors.requestTemperatures() to issue a global temperature request to all devices on the bus
     sensors.requestTemperatures();
+
+    // delay for a second
+    delay(1000);
 
     // declare a string to hold the read data
     String readString = "";

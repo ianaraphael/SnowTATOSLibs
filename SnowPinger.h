@@ -18,7 +18,6 @@
 
 #define PINGER_TIMEOUT 100 // timeout to prevent hang in pinger reading (ms)
 
-
 /*************** SnowPinger class ***************/
 // define a class for the snow pinger
 class SnowPinger {
