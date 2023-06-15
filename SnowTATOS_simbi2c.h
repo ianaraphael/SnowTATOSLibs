@@ -28,6 +28,8 @@ void init_sensorController_simbSide() {
   pinMode(SENSORCONTROLLER_CS,INPUT_PULLUP);
   pinMode(SENSORCONTROLLER_CS,OUTPUT);
   digitalWrite(SENSORCONTROLLER_CS,HIGH);
+
+  Wire.begin();
 }
 
 void alertSensorController(){

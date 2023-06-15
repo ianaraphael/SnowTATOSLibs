@@ -156,11 +156,10 @@ public:
     // write the power pin high
     digitalWrite(powerPin, HIGH);
 
+    delay(1000);
+    
     // init the sensors
     sensors.begin();
-
-    // and set resolution for everybody
-    sensors.setResolution(12);
 
     // delay for a second
     delay(1000);

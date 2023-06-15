@@ -17,9 +17,6 @@
 // sample size, number of stations, sampling frequency, transmit frequency
 #define SIMB_DATASIZE 60
 
-// start time as a unix timestamp (seconds)
-#define START_TIME_UNIX 10000
-
 // declare a buffer to hold simb data
 uint8_t simbData[SIMB_DATASIZE];
 

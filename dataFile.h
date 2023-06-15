@@ -16,6 +16,8 @@
 #include "SD.h"
 #include "TimeSnowTATOS.h"
 
+
+
 // SD card pins
 #define SD_CS 10 // SD card chip select
 #define SD_POWER 6 // SD card power
@@ -98,7 +100,7 @@ void writeToFile(String filename, String dataString) {
   if (dataFile) {
 
     // write the data
-    dataFile.println(dataString);
+    dataFile.print(dataString);
 
     // close the file
     dataFile.close();
@@ -187,13 +189,21 @@ int readFileBytes(File dataFile, uint8_t* buffer, int numBytesToRead) {
 
 void getNewestData(byte* simbDataBuf, String filename) {
 
+  SerialUSB.print("About to pack data from filename: ");
+  SerialUSB.println(filename);
+
+
   // determine whether it's a pinger or a temp file
   int index = filename.indexOf('_');
-  char sensorType = filename[index+1];
+  char sensorType = filename.charAt(index+1);
 
-  // get the stn number (index is 3: STN#_P.txt)
-  // https://stackoverflow.com/questions/439573/how-to-convert-a-single-char-into-an-int
-  int stnID = filename[3] - '0';
+  // get the stn number (comes right before the '_')
+  int stnID = (filename.substring(index-1,index)).toInt();
+
+  SerialUSB.print("packing data for station ");
+  SerialUSB.print(stnID,DEC);
+  SerialUSB.print(" of type: 0x");
+  SerialUSB.println((uint8_t) sensorType,HEX);
 
   // get the file size
   unsigned long fileSize = getFileSize(filename);
@@ -204,9 +214,9 @@ void getNewestData(byte* simbDataBuf, String filename) {
   // seek to the end
   seekToPoint(dataFile, fileSize);
 
-  // allocate a counter starting two chars before the end (to avoid the ending
+  // allocate a counter starting four chars before the end (to avoid the ending
   // newline chars)
-  int i = fileSize-2;
+  int i = fileSize-4;
 
   // now start reading backwards
   for (i;i>=0;i--) {
@@ -229,6 +239,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
   // are supposed to be reading)
   char temporaryBuffer[100];
 
+  int k = 0;
   // now for every byte after the newline
   for (i;i<fileSize;i++) {
 
@@ -246,11 +257,15 @@ void getNewestData(byte* simbDataBuf, String filename) {
     }
 
     // otherwise write the char to the buffer
-    temporaryBuffer[i] = holdChar;
+    temporaryBuffer[k] = holdChar;
+    k++;
   }
 
   // close the file
   closeFile(dataFile);
+
+  SerialUSB.println("Data pulled from file: ");
+  SerialUSB.println(temporaryBuffer);
 
   // tokenize the data
   char *delimiter = ",";
@@ -265,7 +280,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
   int startByte = (((stnID-1) * 11)+4)/2;
 
   // now, if it's temp data
-  if (sensorType == 'T') {
+  if (sensorType == 'T' || sensorType == 't') {
 
     // get the three temperatures and convert to unsigned int ((values+56.0) * 67)
     // this pads the minimum temp reading of -55, and gives a max reading of ~+5 degrees
@@ -276,6 +291,23 @@ void getNewestData(byte* simbDataBuf, String filename) {
     uint16_t temp2 = (atof(temp2_char)+56.0) * 67.0;
     char *temp3_char = strtok(NULL,delimiter);
     uint16_t temp3 = (atof(temp3_char)+56.0) * 67.0;
+
+    // // print them
+    // SerialUSB.println("Packing temps for station ");
+    // SerialUSB.println(stnID,DEC);
+    // SerialUSB.println("char: ");
+    // SerialUSB.println(temp1_char);
+    // SerialUSB.println(temp2_char);
+    // SerialUSB.println(temp3_char);
+    //
+    // SerialUSB.println("DEC after conversion: ");
+    // SerialUSB.println(temp1,DEC);
+    // SerialUSB.println(temp2,DEC);
+    // SerialUSB.println(temp3,DEC);
+
+    temp1 = 3082;
+    temp2 = 2747;
+    temp3 = 2412;
 
     // write the data to the correct location in the simb buffer
 
@@ -337,13 +369,32 @@ void getNewestData(byte* simbDataBuf, String filename) {
     }
 
     // if it's pinger data
-  } else if (sensorType == 'P') {
+  } else if (sensorType == 'P' || sensorType == 'p') {
 
     // get the pinger data
     char *pingerData_char = strtok(NULL,delimiter);
+    int pingerData;
 
-    // convert to an int
-    uint8_t pingerData = atoi(pingerData_char);
+    // if it's NaN
+    if (pingerData_char == "NaN") {
+      // set it at 255 (error val)
+      uint8_t pingerData = 255;
+    } else {
+      // convert to an int
+      pingerData = atoi(pingerData_char);
+    }
+
+    // if it's greater than 255
+    if (pingerData > 255) {
+      // make it 255 and recast it
+      pingerData = 255;
+    }
+
+    // recast to a byte
+    pingerData = uint8_t(pingerData);
+
+    SerialUSB.print("packing pinger value: ");
+    SerialUSB.println(pingerData,DEC);
 
     // if it's an odd station
     if (stnID%2 == 1) {
@@ -414,7 +465,7 @@ uint8_t unpackPingerData(byte* simbBuffer,uint8_t stnID){
   uint8_t pingerData;
 
   // if it's an odd station
-  if (stationID%2 == 1){
+  if (stnID%2 == 1){
     // pinger data is split across a byte boundary
     // high nibble of the data is in the low nibble of startByte+4
     // low nibble of the data is in the high nibble of startByte+5
@@ -436,7 +487,7 @@ uint8_t unpackPingerData(byte* simbBuffer,uint8_t stnID){
 float unpackTimestamp(byte* simbBuffer) {
 
   // get the timestamp out of the buffer
-  uint16_t bufferTimestamp = (simbBuffer[0] << 8) | (simbBuffer[1] & 0x00ff);
+  uint16_t bufferTimeStamp = (simbBuffer[0] << 8) | (simbBuffer[1] & 0x00ff);
 
   // convert to decimal days after init time
   // recoveredDecimalDays = (elapsedDecimalDays_multHundred)/100
@@ -454,16 +505,7 @@ void unpackTempData(byte* simbBuffer,float* tempArray,uint8_t stnID) {
   // get the start byte
   int startByte = (((stnID-1) * 11)+4)/2;
 
-  // get the three temperatures and convert to unsigned int ((values+56.0) * 67)
-  // this pads the minimum temp reading of -55, and gives a max reading of ~+5 degrees
-  // without rollover for our twelve bits
-  char *temp1_char = strtok(NULL,delimiter);
-  uint16_t temp1 = (atof(temp1_char)+56.0) * 67.0;
-  char *temp2_char = strtok(NULL,delimiter);
-  uint16_t temp2 = (atof(temp2_char)+56.0) * 67.0;
-  char *temp3_char = strtok(NULL,delimiter);
-  uint16_t temp3 = (atof(temp3_char)+56.0) * 67.0;
-
+  // declare temp vars
   uint16_t temp1;
   uint16_t temp2;
   uint16_t temp3;
