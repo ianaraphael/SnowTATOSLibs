@@ -157,7 +157,7 @@ public:
     digitalWrite(powerPin, HIGH);
 
     delay(1000);
-    
+
     // init the sensors
     sensors.begin();
 

@@ -85,15 +85,6 @@ void init_I2C_scSide() {
   // pull the chip select pin down
   pinMode(SENSORCONTROLLER_CS,INPUT_PULLDOWN);
 
-
-  // SerialUSB.println("Sensor controller initiated, waiting for SIMB to initialize");
-  // //TODO: don't wait for SIMB to initialize
-  // // wait around until SIMB gives us the go ahead by shifting the chip select high
-  // while(digitalRead(SENSORCONTROLLER_CS) == LOW) {
-  // }
-  //
-  // SerialUSB.println("SIMB activated, attaching interrupt");
-
   // pull up the chip select pin
   pinMode(SENSORCONTROLLER_CS,INPUT_PULLUP);
 
@@ -112,14 +103,7 @@ bool simbRequestedData() {
 // function to send data over to simb.
 void sendDataToSimb(uint8_t *simbData) {
 
-  // // allocate a buffer to hold the data
-  // char data[SIMB_DATASIZE];
-  //
-  // // collect the data into the buffer
-  // dataFile_getData(data);
-
   uint8_t* data = simbData;
-  // uint8_t* data =(uint8_t*) "12345678912345678912345678912345678912345678912345678912345";
 
   // reset our num bytes left to send
   int n_bytesLeftToSendSIMB = SIMB_DATASIZE;
@@ -134,26 +118,11 @@ void sendDataToSimb(uint8_t *simbData) {
   SerialUSB.println("");
   SerialUSB.println("Packaging data and standing by.");
 
-  unsigned long simbTransactionStartTime = millis();
-
   // switch to i2cCollectionState 2 (data packing)
   i2cCollectionState = 2;
 
   // while we haven't sent all the data
   while (i2cCollectionState != -1) {
-
-    // if we timeout (5 mins)
-    if (millis() - simbTransactionStartTime > 300000) {
-
-      // reset our request flag
-      simbRequestFlag = false;
-
-      // set our collection state to -1
-      i2cCollectionState = -1;
-
-      // break out of the loop
-      break;
-    }
 
     // switch on the i2cCollectionState variable
     switch(i2cCollectionState) {

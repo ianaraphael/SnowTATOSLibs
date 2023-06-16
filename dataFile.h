@@ -16,15 +16,12 @@
 #include "SD.h"
 #include "TimeSnowTATOS.h"
 
-
-
 // SD card pins
 #define SD_CS 10 // SD card chip select
 #define SD_POWER 6 // SD card power
 #define SD_CD NAN // SD card chip DETECT. Indicates presence/absence of SD card. High when card is inserted.
 #define RADIO_CS 5 // radio chip select pin
 #define LED 13
-
 
 /************ openFile_read ************/
 /*
@@ -192,7 +189,6 @@ void getNewestData(byte* simbDataBuf, String filename) {
   SerialUSB.print("About to pack data from filename: ");
   SerialUSB.println(filename);
 
-
   // determine whether it's a pinger or a temp file
   int index = filename.indexOf('_');
   char sensorType = filename.charAt(index+1);
@@ -277,20 +273,28 @@ void getNewestData(byte* simbDataBuf, String filename) {
   char *timeStamp = strtok(NULL,delimiter);
 
   // allocate an int to keep track of where the data starts for this station
-  int startByte = (((stnID-1) * 11)+4)/2;
+  int startByte = ((stnID-1) * 7)+2;
 
   // now, if it's temp data
   if (sensorType == 'T' || sensorType == 't') {
 
-    // get the three temperatures and convert to unsigned int ((values+56.0) * 67)
-    // this pads the minimum temp reading of -55, and gives a max reading of ~+5 degrees
-    // without rollover for our twelve bits
+    // get the three temperatures and convert to signed integer
     char *temp1_char = strtok(NULL,delimiter);
-    uint16_t temp1 = (atof(temp1_char)+56.0) * 67.0;
+    int temp1 = atof(temp1_char)*1000;
     char *temp2_char = strtok(NULL,delimiter);
-    uint16_t temp2 = (atof(temp2_char)+56.0) * 67.0;
+    int temp2 = atof(temp2_char)*1000;
     char *temp3_char = strtok(NULL,delimiter);
-    uint16_t temp3 = (atof(temp3_char)+56.0) * 67.0;
+    int temp3 = atof(temp3_char)*1000;
+
+    if (temp1 > 32 || temp1 < 32) {
+      temp1 = 32;
+    }
+    if (temp2 > 32 || temp2 < 32) {
+      temp2 = 32;
+    }
+    if (temp3 > 32 || temp3 < 32) {
+      temp3 = 32;
+    }
 
     // // print them
     // SerialUSB.println("Packing temps for station ");
@@ -305,68 +309,13 @@ void getNewestData(byte* simbDataBuf, String filename) {
     // SerialUSB.println(temp2,DEC);
     // SerialUSB.println(temp3,DEC);
 
-    temp1 = 3082;
-    temp2 = 2747;
-    temp3 = 2412;
-
-    // write the data to the correct location in the simb buffer
-
-    // if it's an odd station
-    if (stnID%2 == 1) {
-
-      // byte1 is the low nibble of the high byte and the high nibble of the low byte of temp 1
-      // byte 1 = lowNybble(highByte(temp1)) + highNibble(lowByte(temp1))
-      byte byte1 = (highByte(temp1) << 4) | (lowByte(temp1) >> 4);
-
-      // high nibble of the second byte is the low nibble of the low byte of temp 1.
-      // we'll just shift it into a high nibble.
-      byte byte2 = (lowByte(temp1) << 4);
-      // now the low nibble of byte2 is the low nibble of the high byte of temp 2
-      byte2 = byte2 | (highByte(temp2) & B00001111);
-
-      // byte 3 is the low byte of temp 2
-      byte byte3 = lowByte(temp2);
-
-      // byte4 is the low nibble of the high byte and the high nibble of the low byte of temp 3
-      byte byte4 = (highByte(temp3) << 4) | (lowByte(temp3) >> 4);
-
-      // byte5 is the low nibble of the lowbyte of temp3, shifted up 4 bits.
-      // we'll put the high byte of the pinger data in later
-      byte byte5 = (lowByte(temp3) << 4);
-
-      // write all of the data to the buffer
-      simbDataBuf[startByte] = byte1;
-      simbDataBuf[startByte+1] = byte2;
-      simbDataBuf[startByte+2] = byte3;
-      simbDataBuf[startByte+3] = byte4;
-      simbDataBuf[startByte+4] = byte5;
-
-      // otherwise, if it's an even station
-    } else if (stnID%2 == 0) {
-
-      // byte1 is the high nibble of startByte and the low nibble of the high byte of temp1
-      byte byte1 = (simbDataBuf[startByte] & B11110000) | (highByte(temp1) & B00001111);
-
-      // byte2 is the low byte of temp1
-      byte byte2 = lowByte(temp1);
-
-      // byte3 is the low nibble of the high byte and the high nibble of the low byte of temp2
-      byte byte3 = (highByte(temp2) << 4) | (lowByte(temp2) >> 4);
-
-      // byte4 is the low nibble of the low byte of temp 2 and the low nibble of the high byte of temp 3
-      byte byte4 = (lowByte(temp2) << 4) | (highByte(temp3) >> 4);
-
-      // byte5 the lowbyte of temp3
-      byte byte5 = lowByte(temp3);
-
-      // write all of the data to the buffer
-      simbDataBuf[startByte] = byte1;
-      simbDataBuf[startByte+1] = byte2;
-      simbDataBuf[startByte+2] = byte3;
-      simbDataBuf[startByte+3] = byte4;
-      simbDataBuf[startByte+4] = byte5;
-
-    }
+    // write all of the data to the buffer
+    simbDataBuf[startByte] = highByte(temp1);
+    simbDataBuf[startByte+1] = lowByte(temp1);
+    simbDataBuf[startByte+2] = highByte(temp2);
+    simbDataBuf[startByte+3] = lowByte(temp2);
+    simbDataBuf[startByte+4] = highByte(temp3);
+    simbDataBuf[startByte+5] = lowByte(temp3);
 
     // if it's pinger data
   } else if (sensorType == 'P' || sensorType == 'p') {
@@ -386,7 +335,7 @@ void getNewestData(byte* simbDataBuf, String filename) {
 
     // if it's greater than 255
     if (pingerData > 255) {
-      // make it 255 and recast it
+      // make it 255
       pingerData = 255;
     }
 
@@ -396,28 +345,8 @@ void getNewestData(byte* simbDataBuf, String filename) {
     SerialUSB.print("packing pinger value: ");
     SerialUSB.println(pingerData,DEC);
 
-    // if it's an odd station
-    if (stnID%2 == 1) {
-
-      // pinger data is split across a byte boundary
-
-      // high nibble of the pingerData goes in the low nibble of startByte + 4
-      byte byte1 = (simbDataBuf[startByte+4] & B11110000) | (pingerData >> 4);
-
-      // low nibble of pingerdata goes in the high nibble of start byte + 5
-      byte byte2 = (pingerData << 4) | (simbDataBuf[startByte+5] & B00001111);
-
-      // put the data in the buffer
-      simbDataBuf[startByte+4] = byte1;
-      simbDataBuf[startByte+5] = byte2;
-
-      // otherwise, if it's an even station
-    } else if (stnID%2 == 0) {
-
-      // pinger data starts on a byte boundary.
-      // put it in the right spot
-      simbDataBuf[startByte+5] = pingerData;
-    }
+    // pack it in the buffer
+    simbDataBuf[startByte+6] = pingerData;
   }
 
   // get the timestamp out of the buffer
@@ -460,31 +389,17 @@ void getNewestData(byte* simbDataBuf, String filename) {
 uint8_t unpackPingerData(byte* simbBuffer,uint8_t stnID){
 
   // get the start byte
-  int startByte = (((stnID-1) * 11)+4)/2;
+  int startByte = ((stnID-1) * 7)+2;
 
-  uint8_t pingerData;
-
-  // if it's an odd station
-  if (stnID%2 == 1){
-    // pinger data is split across a byte boundary
-    // high nibble of the data is in the low nibble of startByte+4
-    // low nibble of the data is in the high nibble of startByte+5
-    pingerData = (simbBuffer[startByte+4] << 4) | (simbBuffer[startByte+5] >> 4);
-
-    // otherwise it's an even station
-  } else {
-    // pinger data starts on a byte boundary
-    // extract it
-    pingerData = simbBuffer[startByte+5];
-
-  }
+  // get the pinger data
+  uint8_t pingerData = simbBuffer[startByte+6];
 
   // return the value
   return pingerData;
 }
 
 // unpacks the timestamp from the simb buffer
-float unpackTimestamp(byte* simbBuffer) {
+float unpackTimeStamp(byte* simbBuffer) {
 
   // get the timestamp out of the buffer
   uint16_t bufferTimeStamp = (simbBuffer[0] << 8) | (simbBuffer[1] & 0x00ff);
@@ -503,50 +418,21 @@ float unpackTimestamp(byte* simbBuffer) {
 void unpackTempData(byte* simbBuffer,float* tempArray,uint8_t stnID) {
 
   // get the start byte
-  int startByte = (((stnID-1) * 11)+4)/2;
+  int startByte = ((stnID-1) * 7)+2;
 
   // declare temp vars
-  uint16_t temp1;
-  uint16_t temp2;
-  uint16_t temp3;
+  uint16_t temp1_int;
+  uint16_t temp2_int;
+  uint16_t temp3_int;
 
-  // if it's an odd station
-  if (stnID%2 == 1) {
-
-    // low nibble of the high byte of data is the high nibble of the startByte in the array
-    // low byte is the low nibble of the first byte and the high nibble of the second byte
-    byte hiByte = (simbBuffer[startByte] >> 4);
-    byte loByte = (simbBuffer[startByte] << 4) | (simbBuffer[startByte+1] >> 4);
-    temp1 = (hiByte << 8) | (loByte & 0x00ff);
-
-    hiByte = simbBuffer[startByte+1] & B00001111;
-    loByte = simbBuffer[startByte+2];
-    temp2 = (hiByte << 8) | (loByte & 0x00ff);
-
-    hiByte = simbBuffer[startByte+3] >> 4;
-    loByte = (simbBuffer[startByte+3] << 4) | (simbBuffer[startByte+4] >> 4);
-    temp3 = (hiByte << 8) | (loByte & 0x00ff);
-
-    // otherwise, if it's an even station
-  } else if (stnID%2 == 0) {
-
-    byte hiByte = (simbBuffer[startByte] & B00001111);
-    byte loByte = simbBuffer[startByte+1];
-    temp1 = (hiByte << 8) | (loByte & 0x00ff);
-
-    hiByte = (simbBuffer[startByte+2] >> 4);
-    loByte = (simbBuffer[startByte+2] << 4) | (simbBuffer[startByte+3] >> 4);
-    temp2 = (hiByte << 8) | (loByte & 0x00ff);
-
-    hiByte = (simbBuffer[startByte+3] & B00001111);
-    loByte = simbBuffer[startByte+4];
-    temp3 = (hiByte << 8) | (loByte & 0x00ff);
-  }
+  temp1_int = (simbBuffer[startByte] << 8) | (simbBuffer[startByte+1] & 0x00ff);
+  temp2_int = (simbBuffer[startByte+2] << 8) | (simbBuffer[startByte+3] & 0x00ff);
+  temp3_int = (simbBuffer[startByte+4] << 8) | (simbBuffer[startByte+5] & 0x00ff);
 
   // now convert the temperatures back to celcius
-  tempArray[0] = (temp1/67.0)-56.0;
-  tempArray[1] = (temp2/67.0)-56.0;
-  tempArray[2] = (temp3/67.0)-56.0;
+  tempArray[0] = temp1_int/1000.0;
+  tempArray[1] = temp2_int/1000.0;
+  tempArray[2] = temp3_int/1000.0;
 }
 
 

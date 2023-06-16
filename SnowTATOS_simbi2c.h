@@ -17,7 +17,7 @@ ian.a.raphael.th@dartmouth.edu
 #define MAX_PACKET_SIZE 32 // maximum dataframe size
 #define SENSORCONTROLLER_CS 6 // sensor controller chip select on simb side
 #define CS_DELAY 10 // number of milliseconds to wait with chip select pin low
-#define DATA_SIZE 60 // agreed upon data size
+#define DATA_SIZE 74 // agreed upon data size
 
 #define Serial SerialUSB // comment out if not using rocketscream board
 
@@ -29,7 +29,10 @@ void init_sensorController_simbSide() {
   pinMode(SENSORCONTROLLER_CS,OUTPUT);
   digitalWrite(SENSORCONTROLLER_CS,HIGH);
 
+  // begin wire protocol
   Wire.begin();
+  // set a timeout
+  Wire.setWireTimeout(25000, true);
 }
 
 void alertSensorController(){
@@ -44,10 +47,10 @@ void alertSensorController(){
   digitalWrite(SENSORCONTROLLER_CS,HIGH);
 }
 
-void getDataFromSensorController(char *dataBuf) {
+  void getDataFromSensorController(char *dataBuf) {
 
   // flush the wire before we start reading anything
-  while(Wire.available()){
+  while(Wire.available()) {
     Wire.read();
   }
 
