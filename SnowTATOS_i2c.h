@@ -12,7 +12,6 @@ ian.a.raphael.th@dartmouth.edu
 #define SnowTATOS_i2c_h
 
 #include <Wire.h>
-#include "dataFile.h"
 
 #define SENSORCONTROLLER_ADDRESS 9 // Define sensor controller (SC) I2C Address
 #define MAX_PACKET_SIZE 32 // maximum dataframe size

@@ -32,7 +32,7 @@ void init_sensorController_simbSide() {
   // begin wire protocol
   Wire.begin();
   // set a timeout
-  Wire.setWireTimeout(25000, true);
+  Wire.setTimeout(25000, true);
 }
 
 void alertSensorController(){

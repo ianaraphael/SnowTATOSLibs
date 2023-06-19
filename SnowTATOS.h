@@ -1,22 +1,20 @@
 /*
 
-  A library for functions common to snowtatos ArcWatch_v1 server and client
+A library for functions common to snowtatos ArcWatch_v1 server and client
 
-  Ian Raphael
-  2023.06.16
-  ian.a.raphael.th@dartmouth.edu
+Ian Raphael
+2023.06.16
+ian.a.raphael.th@dartmouth.edu
 
 */
 #ifndef SnowTATOS_h
 #define SnowTATOS_h
 
 
-#define STATION_ID 0 // server is always 0
+#define STATION_ID 1 // server is always 0
 
 uint8_t SAMPLING_INTERVAL_MIN = 1; // one minute sampling
 uint8_t SERVER_WAKE_DURATION = 10; // number of minutes for the server to stay awake
-
-#define START_TIME_UNIX 1686715200 // start time as a unix timestamp (seconds)
 
 #define NUM_TEMP_SENSORS 3 // number of sensors
 #define NUM_STATIONS 10 // number of nodes
@@ -54,6 +52,9 @@ void boardSetup() {
   SerialFlash.sleep();
 }
 
+
+
+
 // creates a default "error mask" that paints every value with the standard error value
 void maskSimbData(uint8_t *simbDataBuffer) {
 
@@ -63,10 +64,10 @@ void maskSimbData(uint8_t *simbDataBuffer) {
   uint8_t pingerValue = uint8_t(255);
 
   // for every station
-  for (int i=0;i<NUM_STATIONS;i++){
+  for (int i=1;i<=NUM_STATIONS;i++){
 
     // paint error values
-    int startByte = (stationID-1)*CLIENT_DATA_SIZE;
+    int startByte = (i-1)*CLIENT_DATA_SIZE;
     simbDataBuffer[startByte] = tempHighByte;
     simbDataBuffer[startByte+1] = tempLowByte;
     simbDataBuffer[startByte+2] = tempHighByte;
@@ -78,6 +79,71 @@ void maskSimbData(uint8_t *simbDataBuffer) {
 }
 
 
+
+
+// pack the provided client data into the radio transmission buffer
+void packClientData(float *tempData, uint8_t pingerData, uint8_t *dataBuffer) {
+
+  // for every temp
+  for (int i = 0; i<NUM_TEMP_SENSORS;i++){
+
+    // find the right indices
+    int hiIndex = i*2;
+    int loIndex = hiIndex+1;
+
+    // multiply by 1000 (eg, -20.125*1000 = -20125.0), convert to an int, pack
+    dataBuffer[hiIndex] = (uint8_t) highByte((int) tempData[i]*1000);
+    Serial.println("HiByte: 0x");
+    Serial.println(dataBuffer[hiIndex],HEX);
+    dataBuffer[loIndex] = (uint8_t) lowByte((int) tempData[i]*1000);
+    Serial.println("LoByte: 0x");
+    Serial.println(dataBuffer[loIndex],HEX);
+  }
+
+  // put pinger data in last
+  dataBuffer[2*NUM_TEMP_SENSORS + 1] = (uint8_t) pingerData;
+}
+
+
+
+
+// unpack temp data for a particular client from the simb buffer into an
+// array of floats
+void unpackTempData(uint8_t *dataBuffer, float *tempArray, int stnID) {
+
+  // get the start byte for this station
+  int startByte = (stnID-1)*CLIENT_DATA_SIZE;
+
+  // for every temp
+  for (int i = 0; i<NUM_TEMP_SENSORS;i++) {
+
+    // get the high byte
+    uint8_t hiByte = dataBuffer[startByte+(i*2)];
+
+    // get the low byte
+    uint8_t loByte = dataBuffer[startByte+(i*2)+1];
+
+    // put them together
+    int currTemp_int = (hiByte << 8) | (0x00ff & loByte);
+
+    tempArray[i] = (float) currTemp_int/1000.00;
+  }
+}
+
+// unpack pinger data for a particular client from the simb buffer
+uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
+
+  // get the pinger index (last value for a given station)
+  int startByte = (stnID-1)*CLIENT_DATA_SIZE;
+  int pingerIndex = startByte+(CLIENT_DATA_SIZE-1);
+
+  // return the pinger value
+  return dataBuffer[pingerIndex];
+}
+
+
+
+
 /************************ radio ************************/
 
 
@@ -85,7 +151,7 @@ void maskSimbData(uint8_t *simbDataBuffer) {
 #include "RH_RF95.h"
 
 // radio presets
-#define RADIO_TIMEOUT 20000 // max wait time for radio transmissions in ms
+#define RADIO_TIMEOUT 5000 // max wait time for radio transmissions in ms
 #define RADIO_FREQ 915.0 // radio frequency
 #define RADIO_POWER 23 // max power
 
@@ -96,6 +162,10 @@ void maskSimbData(uint8_t *simbDataBuffer) {
 // server radio address is always 0
 #define SERVER_ADDRESS 0
 #define RADIO_ID STATION_ID
+
+#define MAX_TRANSMISSION_ATTEMPTS 3 // maximum number of times for a client to retry sending data
+
+
 
 RH_RF95 driver(RADIO_CS, RADIO_INT); // Singleton instance of the radio driver
 RHReliableDatagram manager(driver, RADIO_ID); // Class to manage message delivery and receipt, using the driver declared above
@@ -120,7 +190,7 @@ void init_Radio() {
 
 /************ client radio transmission ************/
 /*
-  function to transmit a byte stream to server over rf95 radio
+function to transmit a byte stream to server over rf95 radio
 */
 bool sendData_fromClient(uint8_t *data) {
 
@@ -132,7 +202,7 @@ bool sendData_fromClient(uint8_t *data) {
 
     // send the data to the server
     if (manager.sendtoWait(data, sizeof(data), SERVER_ADDRESS)) {
-      SerialUSB.print("Received receipt acknowledgement from server");
+      SerialUSB.println("Received receipt acknowledgement from server");
 
       // successfully transmitted
       return true;
@@ -143,7 +213,7 @@ bool sendData_fromClient(uint8_t *data) {
       // increment the number of attempts we've made
       nTransmissionAttempts++;
 
-      // build in a random delay between 1 and 20 based on a multiple of stationID
+      // build in a random delay between 1 and 20 seconds based on a multiple of stationID
       delay(STATION_ID*100*random(10,21));
 
       // continue next cycle of the loop
@@ -174,7 +244,7 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
     uint8_t from;
 
     // if we've gotten a message, receive and store it, its length, and station id
-    if (manager.recvfromAck(dataBuffer, &len, &from) {
+    if (manager.recvfromAck(dataBuffer, &len, &from)) {
 
       // and return the station id
       return from;
@@ -196,6 +266,8 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
 RTCZero rtc; // real time clock object
 
 uint8_t ALARM_MINUTES = 0; // minute to sample on
+
+bool synchronizedWithNetwork = false;
 
 /************ getTime() ************/
 /*
@@ -283,7 +355,7 @@ bool init_RTC() {
 // Setup a oneWire instance to communicate with any OneWire devices
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature tempSensors = DallasTemperature(&oneWire);
-DeviceAddress* tempAddresses[NUM_TEMP_SENSORS];
+uint8_t tempAddresses[NUM_TEMP_SENSORS][8];
 
 // initialize the temperature sensors
 void initTemps() {
@@ -304,7 +376,7 @@ void initTemps() {
   for (int i = 0; i < NUM_TEMP_SENSORS; i++) {
 
     // if error getting the address
-    if (tempSensors.getAddress(tempAddresses[i], i))) {
+    if (tempSensors.getAddress(tempAddresses[i], i)) {
 
       // print error
       Serial.print("Couldn't find sensor at index ");
@@ -316,8 +388,9 @@ void initTemps() {
   digitalWrite(TEMP_POWER, LOW);
 }
 
-// function to read temperatures from temp sensors
-void readTemps(int* tempData) {
+// function to read temperatures from temp sensors. provides int values of temp
+// multiplied by 1000. for temp in celcius, divide by 1000.
+void readTemps(float* tempData) {
 
   pinMode(TEMP_POWER, OUTPUT);
   digitalWrite(TEMP_POWER, HIGH);
@@ -340,16 +413,15 @@ void readTemps(int* tempData) {
   for (int i = 0; i < NUM_TEMP_SENSORS; i++) {
 
     // get the temp
-    float currTemp += tempSensors.getTempC(tempAddresses[i]);
+    float currTemp = tempSensors.getTempC(tempAddresses[i]);
 
-    // if it's greater or less than 32
-    if (currTemp > 32.0 || currTemp < 32.0){
+    // if it's greater than 32 or less than -32
+    if (currTemp > 32.0 || currTemp < -32.0){
       currTemp = 32.0; // set it to 32
     }
 
-    // multiply by 1000 (eg, -20.125*1000 = -20125.0), convert to an int, and pack
-    // into the provided buffer
-    tempData[i] = (int) currTemp*1000.00;
+    // put it in the buffer
+    tempData[i] = currTemp;
   }
 
   // write the power pin low
@@ -362,8 +434,10 @@ void readTemps(int* tempData) {
 // pinger
 #define PINGER_BUS Serial1 // serial port to read pinger
 #define PINGER_POWER 11 // pinger power line
+#define PINGER_TIMEOUT 100 // pinger timeout
 #define N_PINGERSAMPLES 5 // number of samples to average for each pinger reading
 #define MAX_PINGER_SAMPLE_ATTEMPTS 30 // maximum number of samples to attempt in order to achieve N_PINGERSAMPLES successfully
+
 
 uint8_t readPinger() {
 
@@ -396,7 +470,7 @@ uint8_t readPinger() {
 
     int nLoops = 0;
 
-    // loop while we have fewer than nPingerSamples
+    // loop while we have fewer than N_PINGERSAMPLES
     do {
 
       // increment our loop counter
@@ -452,7 +526,7 @@ uint8_t readPinger() {
         nGoodSamples++;
       }
 
-      // while we have fewer than nPingerSamples and we haven't timed out
+      // while we have fewer than N_PINGERSAMPLES and we haven't timed out
     } while (nGoodSamples < N_PINGERSAMPLES & nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
 
     // if we got the req'd number of samples before timing out
@@ -464,7 +538,7 @@ uint8_t readPinger() {
     } else {
 
       // average the running sum
-      float pingerAverage_float_cm = runningSum/nPingerSamples;
+      float pingerAverage_float_cm = runningSum/N_PINGERSAMPLES;
 
       // round off and convert to int
       pingerData = (uint8_t) round(pingerAverage_float_cm);
@@ -478,7 +552,7 @@ uint8_t readPinger() {
   }
 
   // write the power pin low
-  digitalWrite(powerPin, LOW);
+  digitalWrite(PINGER_POWER, LOW);
 
   return pingerData;
 }
@@ -487,6 +561,16 @@ uint8_t readPinger() {
 
 
 /************************ alarms ************************/
+
+
+/************ alarm_one_routine ************/
+/*
+dummy routine.
+*/
+void alarm_one_routine() {
+}
+
+
 
 /************ setAlarm_client ************/
 /*
@@ -552,7 +636,7 @@ void setAlarm_client() {
 
 /************ setAlarm_server ************/
 // Function to set RTC wakeup alarm for server side
-void setWakeAlarm_server() {
+void setAlarm_server() {
 
   // always wake up on the 0th second
   rtc.setAlarmSeconds(0);
@@ -570,7 +654,7 @@ void setWakeAlarm_server() {
     ALARM_MINUTES = rtc.getMinutes() + SAMPLING_INTERVAL_MIN;
 
     // then set the alarm with awake period centered around ALARM_MINUTES
-    rtc.setAlarmMinutes(ALARM_MINUTES-floor(SERVER_WAKE_DURATIONOD/2));
+    rtc.setAlarmMinutes(ALARM_MINUTES-floor(SERVER_WAKE_DURATION/2));
 
     // finally, enable the alarm to match
     rtc.enableAlarm(rtc.MATCH_MMSS);
@@ -587,7 +671,7 @@ void setWakeAlarm_server() {
     // and add an interval to get to the next one
     uint8_t ALARM_HOURS = SAMPLING_INTERVAL_HOUR;
 
-    // now subtract 1 because we're going to wake up SERVER_WAKE_DURATIONOD/2 minutes before the hour
+    // now subtract 1 because we're going to wake up SERVER_WAKE_DURATION/2 minutes before the hour
     ALARM_HOURS = ALARM_HOURS - 1;
 
     // if it's supposed to be midnight
@@ -597,7 +681,7 @@ void setWakeAlarm_server() {
     }
 
     // now get the alarm minutes as 60 - SERVER_WAKE_DURATIONOD/2
-    ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATIONOD/2);
+    ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATION/2);
 
     // set minutes
     rtc.setAlarmMinutes(ALARM_MINUTES);
@@ -610,15 +694,5 @@ void setWakeAlarm_server() {
 
   rtc.attachInterrupt(alarm_one_routine);
 }
-
-
-
-/************ alarm_one_routine ************/
-/*
-dummy routine.
-*/
-void alarm_one_routine() {
-}
-
 
 #endif
