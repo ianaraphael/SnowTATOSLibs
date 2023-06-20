@@ -11,7 +11,7 @@ ian.a.raphael.th@dartmouth.edu
 #define SnowTATOS_h
 
 
-#define STATION_ID 1 // server is always 0
+#define STATION_ID 0 // server is always 0
 
 uint8_t SAMPLING_INTERVAL_MIN = 1; // one minute sampling
 uint8_t SERVER_WAKE_DURATION = 10; // number of minutes for the server to stay awake
@@ -20,6 +20,8 @@ uint8_t SERVER_WAKE_DURATION = 10; // number of minutes for the server to stay a
 #define NUM_STATIONS 10 // number of nodes
 
 #define CLIENT_DATA_SIZE 7 // data size for each client transmission: 6temps * 2bytes + 1pinger*1byte
+
+#define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
 
 /************************ board ************************/
 
@@ -51,7 +53,6 @@ void boardSetup() {
   SerialFlash.begin(flashChipSelect);
   SerialFlash.sleep();
 }
-
 
 
 
@@ -91,17 +92,21 @@ void packClientData(float *tempData, uint8_t pingerData, uint8_t *dataBuffer) {
     int hiIndex = i*2;
     int loIndex = hiIndex+1;
 
-    // multiply by 1000 (eg, -20.125*1000 = -20125.0), convert to an int, pack
-    dataBuffer[hiIndex] = (uint8_t) highByte((int) tempData[i]*1000);
-    Serial.println("HiByte: 0x");
-    Serial.println(dataBuffer[hiIndex],HEX);
-    dataBuffer[loIndex] = (uint8_t) lowByte((int) tempData[i]*1000);
-    Serial.println("LoByte: 0x");
-    Serial.println(dataBuffer[loIndex],HEX);
+    // get the temp as an int *1000
+    // multiply by 1000 (eg, -20.125*1000 = -20125.0)
+    int currTemp = tempData[i] * 1000;
+
+    // get the hi and lo byte
+    uint8_t hiByte = highByte(currTemp);
+    uint8_t loByte = lowByte(currTemp);
+
+    // pack them
+    dataBuffer[hiIndex] = hiByte;
+    dataBuffer[loIndex] = loByte;
   }
 
   // put pinger data in last
-  dataBuffer[2*NUM_TEMP_SENSORS + 1] = (uint8_t) pingerData;
+  dataBuffer[2*NUM_TEMP_SENSORS] = pingerData;
 }
 
 
@@ -140,8 +145,6 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
   // return the pinger value
   return dataBuffer[pingerIndex];
 }
-
-
 
 
 /************************ radio ************************/
@@ -201,7 +204,7 @@ bool sendData_fromClient(uint8_t *data) {
     SerialUSB.println("Attempting to send a message to the server");
 
     // send the data to the server
-    if (manager.sendtoWait(data, sizeof(data), SERVER_ADDRESS)) {
+    if (manager.sendtoWait(data, CLIENT_DATA_SIZE, SERVER_ADDRESS)) {
       SerialUSB.println("Received receipt acknowledgement from server");
 
       // successfully transmitted
@@ -232,14 +235,15 @@ function to receive a byte stream from a client by radio
 */
 int receiveData_fromClient(uint8_t* dataBuffer) {
 
-  // memset the buffer to 0s to make sure we're
-  memset(dataBuffer,0,sizeof(dataBuffer));
+  // // memset the buffer to 0s to make sure we're
+  // memset(dataBuffer,0,sizeof(dataBuffer));
 
   // if the manager isn't busy right now
   if (manager.available()) {
 
     // copy the size of the buffer
-    uint8_t len = sizeof(dataBuffer);
+    uint8_t len = CLIENT_DATA_SIZE;
+
     // allocate a short to store station id
     uint8_t from;
 

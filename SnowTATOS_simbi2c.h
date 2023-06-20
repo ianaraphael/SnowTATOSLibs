@@ -17,7 +17,6 @@ ian.a.raphael.th@dartmouth.edu
 #define MAX_PACKET_SIZE 32 // maximum dataframe size
 #define SENSORCONTROLLER_CS 6 // sensor controller chip select on simb side
 #define CS_DELAY 10 // number of milliseconds to wait with chip select pin low
-#define DATA_SIZE 74 // agreed upon data size
 
 #define Serial SerialUSB // comment out if not using rocketscream board
 
@@ -32,7 +31,7 @@ void init_sensorController_simbSide() {
   // begin wire protocol
   Wire.begin();
   // set a timeout
-  Wire.setTimeout(25000, true);
+  // Wire.setTimeout(25000, true);
 }
 
 void alertSensorController(){
@@ -47,15 +46,10 @@ void alertSensorController(){
   digitalWrite(SENSORCONTROLLER_CS,HIGH);
 }
 
-  void getDataFromSensorController(char *dataBuf) {
-
-  // flush the wire before we start reading anything
-  while(Wire.available()) {
-    Wire.read();
-  }
+void getDataFromSensorController(uint8_t *dataBuf) {
 
   // update how much data we're requesting
-  uint16_t n_dataToGet = DATA_SIZE;
+  uint16_t n_dataToGet = SIMB_DATASIZE;
 
   // counter variable to track where we are in the total data retrieval session
   int i_session = 0;
@@ -75,6 +69,11 @@ void alertSensorController(){
       currPacketSize = n_dataToGet;
     }
 
+    // flush the wire before we read anything
+    while(Wire.available()) {
+      Wire.read();
+    }
+
     Serial.print("We expect this many bytes from SC: ");
     Serial.println(currPacketSize,DEC);
 
@@ -82,6 +81,9 @@ void alertSensorController(){
     Serial.print("SC put this many bytes on the wire: ");
     int nBytesCurrPacket = Wire.requestFrom(SENSORCONTROLLER_ADDRESS,currPacketSize);
     Serial.println(nBytesCurrPacket,DEC);
+
+    // delay briefly
+    delay(1000);
 
     // counter variable to track where we are in the current data packet
     int i_currPacket = 0;

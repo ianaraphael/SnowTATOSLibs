@@ -111,7 +111,7 @@ void sendDataToSimb(uint8_t *simbData) {
   SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
   SerialUSB.println(" bytes to send: ");
   for (int i=0;i<SIMB_DATASIZE;i++){
-    SerialUSB.print(simbData[i],BIN);
+    SerialUSB.print(simbData[i],HEX);
     SerialUSB.print(" ");
   }
   SerialUSB.println("");
@@ -169,7 +169,7 @@ void sendDataToSimb(uint8_t *simbData) {
       SerialUSB.print("SIMB has requested data. Packaging: ");
       // SerialUSB.println((char*) i2cSendBuf);
       for (int i=0;i<sizeof(i2cSendBuf);i++){
-        SerialUSB.print(i2cSendBuf[i],BIN);
+        SerialUSB.print(i2cSendBuf[i],HEX);
         SerialUSB.print(" ");
       }
       SerialUSB.println("");
