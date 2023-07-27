@@ -11,6 +11,7 @@ ian.a.raphael.th@dartmouth.edu
 #ifndef SnowTATOS_simbi2c_h
 #define SnowTATOS_simbi2c_h
 
+#include "SnowTATOS.h"
 #include <Wire.h>
 
 #define SENSORCONTROLLER_ADDRESS 9 // sensor controller (SC) I2C Address
@@ -18,7 +19,7 @@ ian.a.raphael.th@dartmouth.edu
 #define SENSORCONTROLLER_CS 6 // sensor controller chip select on simb side
 #define CS_DELAY 10 // number of milliseconds to wait with chip select pin low
 
-#define Serial SerialUSB // comment out if not using rocketscream board
+// #define Serial SerialUSB // comment out if not using rocketscream board
 
 // sets pin mode for i2c chip select
 void init_sensorController_simbSide() {
@@ -29,7 +30,7 @@ void init_sensorController_simbSide() {
   digitalWrite(SENSORCONTROLLER_CS,HIGH);
 
   // begin wire protocol
-  Wire.begin();
+  // Wire.begin();
   // set a timeout
   // Wire.setTimeout(25000, true);
 }

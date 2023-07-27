@@ -107,15 +107,15 @@ void sendDataToSimb(uint8_t *simbData) {
   // reset our num bytes left to send
   int n_bytesLeftToSendSIMB = SIMB_DATASIZE;
 
-  SerialUSB.print("SIMB requested data size. We have ");
-  SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
-  SerialUSB.println(" bytes to send: ");
+  Serial.print("SIMB requested data size. We have ");
+  Serial.print(n_bytesLeftToSendSIMB,DEC);
+  Serial.println(" bytes to send: ");
   for (int i=0;i<SIMB_DATASIZE;i++){
-    SerialUSB.print(simbData[i],HEX);
-    SerialUSB.print(" ");
+    Serial.print(simbData[i],HEX);
+    Serial.print(" ");
   }
-  SerialUSB.println("");
-  SerialUSB.println("Packaging data and standing by.");
+  Serial.println("");
+  Serial.println("Packaging data and standing by.");
 
   // switch to i2cCollectionState 2 (data packing)
   i2cCollectionState = 2;
@@ -166,17 +166,17 @@ void sendDataToSimb(uint8_t *simbData) {
       i2cSendBuf[currI2cPacketSize] = '\0';
 
       // preview print
-      SerialUSB.print("SIMB has requested data. Packaging: ");
-      // SerialUSB.println((char*) i2cSendBuf);
+      Serial.print("SIMB has requested data. Packaging: ");
+      // Serial.println((char*) i2cSendBuf);
       for (int i=0;i<sizeof(i2cSendBuf);i++){
-        SerialUSB.print(i2cSendBuf[i],HEX);
-        SerialUSB.print(" ");
+        Serial.print(i2cSendBuf[i],HEX);
+        Serial.print(" ");
       }
-      SerialUSB.println("");
+      Serial.println("");
 
       // print how much we have left to send
-      SerialUSB.print(n_bytesLeftToSendSIMB,DEC);
-      SerialUSB.println(" bytes left to send.");
+      Serial.print(n_bytesLeftToSendSIMB,DEC);
+      Serial.println(" bytes left to send.");
 
       // if we're not supposed to go to sleep
       if (i2cCollectionState == 2) {
