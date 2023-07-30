@@ -729,4 +729,83 @@ void setAlarm_server() {
   sc_RTC.attachInterrupt(alarm_one_routine);
 }
 
+
+/************************ iridium ************************/
+
+#include <IridiumSBD.h>
+
+#define SBD_RECORD_ID           0xA0
+#define SBD_RECORD_VERSION      0x00
+#define SBD_RECORD_HEADER       (SBD_RECORD_ID | SBD_RECORD_VERSION)
+
+#define IRIDIUM_CS 9 // chip select pin for the iridium unit
+#define TRANSMISSION_INTERVAL 4   // 1 = hourly, 4 = every 4 hours
+#define IRIDIUM_ATTEMPTS 10
+#define IRIDIUM_RETRY_DELAY 20000 // 10 seconds
+
+int iridiumError;
+
+IridiumSBD iridium(Serial1, IRIDIUM_CS);
+
+typedef union {
+
+  struct {
+    int32_t timestamp;
+    byte data[SIMB_DATASIZE]; // actual data
+
+  } __attribute__((packed));
+
+  uint8_t bytes[0];
+
+} SBDMessage;
+
+
+SBDMessage message;
+
+
+void clearMessage() {
+
+  memset(message.bytes, 0, sizeof(message));
+
+}
+
+
+void configureIridium(){
+  Serial.println("Configuring the iridium");
+  iridium.attachConsole(Serial);
+  iridium.attachDiags(Serial);
+  Serial.println("after iridium begin");
+  iridium.setPowerProfile(0);
+  Serial.println("after set power profile");
+  iridium.useMSSTMWorkaround(false);
+}
+
+
+void iridiumOn() {
+  pinMode(IRIDIUM_CS,OUTPUT);
+  digitalWrite(IRIDIUM_CS, HIGH);
+
+  Serial.println("Turned on the iridium");
+
+  Serial1.begin(19200);
+
+  configureIridium();
+
+  Serial.println("configured the iridium");
+
+  iridium.begin();
+}
+
+void iridiumOff()
+{
+  digitalWrite(IRIDIUM_CS, LOW);
+}
+
+void sendIridium()
+{
+  iridiumError  = -1;
+
+  iridiumError = iridium.sendSBDBinary(message.bytes, sizeof(message)); //actually transmit
+}
+
 #endif
