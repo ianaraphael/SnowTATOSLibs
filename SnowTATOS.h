@@ -12,14 +12,15 @@ ian.a.raphael.th@dartmouth.edu
 
 
 #define STATION_ID 0 // server is always 0
-
+#define TEST true // false for deployment
+#define IRIDIUM_ENABLE false // deactivate for testing
 uint8_t SAMPLING_INTERVAL_MIN = 240; // sampling interval in minutes
 uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 
 #define NUM_TEMP_SENSORS 3 // number of sensors
 #define NUM_STATIONS 10 // number of nodes
 
-#define CLIENT_DATA_SIZE 7 // data size for each client transmission: 6temps * 2bytes + 1pinger*1byte
+#define CLIENT_DATA_SIZE 7 // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
 
 #define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
 
@@ -31,6 +32,8 @@ const int flashChipSelect = 4;
 
 /************ Board setup ************/
 void boardSetup() {
+
+  ALARM_MINUTES = 0;
 
   unsigned char pinNumber;
 
@@ -156,7 +159,7 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
 // radio presets
 #define RADIO_TIMEOUT 5000 // max wait time for radio transmissions in ms
 #define RADIO_FREQ 915.0 // radio frequency
-#define RADIO_POWER 23 // max power
+#define RADIO_POWER 20 // max power
 
 // Radio pins
 #define RADIO_CS 5 // radio chip select pin
@@ -168,8 +171,6 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
 
 #define MAX_TRANSMISSION_ATTEMPTS 3 // maximum number of times for a client to retry sending data
 
-
-
 RH_RF95 driver(RADIO_CS, RADIO_INT); // Singleton instance of the radio driver
 RHReliableDatagram manager(driver, RADIO_ID); // Class to manage message delivery and receipt, using the driver declared above
 
@@ -179,16 +180,17 @@ Function to initialize the radio
 */
 bool init_Radio() {
 
+  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
+  // you can set transmitter powers from 5 to 23 dBm:
+  driver.setTxPower(RADIO_POWER, false);
+  driver.setFrequency(RADIO_FREQ);
+
   // wait while the radio initializes
   manager.init();
   delay(1000);
 
   manager.setTimeout(RADIO_TIMEOUT); // set timeout
-
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
-  // you can set transmitter powers from 5 to 23 dBm:
-  driver.setTxPower(RADIO_POWER, false);
-  driver.setFrequency(RADIO_FREQ);
+  manager.setRetries(MAX_TRANSMISSION_ATTEMPTS);
 
   return true;
 }
@@ -199,33 +201,11 @@ function to transmit a byte stream to server over rf95 radio
 */
 bool sendData_fromClient(uint8_t *data) {
 
-  // set number of transmission attempts to 0
-  int nTransmissionAttempts = 0;
-
-  do {
-
-    // send the data to the server
-    if (manager.sendtoWait(data, CLIENT_DATA_SIZE, SERVER_ADDRESS)) {
-
-      // successfully transmitted
-      return true;
-    } else {
-      // the server did not recieve the message. we'll try again after a random delay
-
-      // increment the number of attempts we've made
-      nTransmissionAttempts++;
-
-      // build in a random delay between 1 and 20 seconds based on a multiple of stationID
-      delay(STATION_ID*100*random(10,21));
-
-      // continue next cycle of the loop
-      continue;
-    }
-    // try again if we failed and haven't reached max attempts
-  } while (nTransmissionAttempts < MAX_TRANSMISSION_ATTEMPTS);
-
-  // failed to transmit
-  return false;
+  if(manager.sendtoWait(data,CLIENT_DATA_SIZE, SERVER_ADDRESS)){
+    return true;
+  } else {
+    return false;
+  }
 }
 
 /************ server radio receipt ************/
@@ -254,7 +234,7 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
     }
   }
 
-  // otherwise return -1 (no message recieved)
+  // otherwise return -1 (no message received)
   return -1;
 }
 
@@ -268,9 +248,9 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
 #include <RTCZero.h>
 RTCZero sc_RTC; // real time clock object
 
-uint8_t ALARM_MINUTES = 0; // minute to sample on
+uint8_t ALARM_MINUTES; // minute to sample on
 
-bool synchronizedWithNetwork = false;
+// bool synchronizedWithNetwork = false;
 
 /************ getTime() ************/
 /*
@@ -344,11 +324,13 @@ bool init_RTC() {
 }
 
 
+// if we're not the server
+#if STATION_ID != 0
+/************************ station stuff ************************/
+
 
 
 /************************ temp sensors ************************/
-
-
 
 // Temp sensors
 #define ONE_WIRE_BUS 7 // temp probe data line
@@ -538,19 +520,25 @@ uint8_t readPinger() {
       // while we have fewer than N_PINGERSAMPLES and we haven't timed out
     } while (nGoodSamples < N_PINGERSAMPLES & nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
 
+
     // if we got the req'd number of samples before timing out
     if (nGoodSamples >= N_PINGERSAMPLES) {
-
-      // set to error
-      pingerData = (uint8_t) 255;
-
-    } else {
 
       // average the running sum
       float pingerAverage_float_cm = runningSum/N_PINGERSAMPLES;
 
+      // if it's greater than 255
+      if (pingerAverage_float_cm > 255.0) {
+        // set to 255
+        pingerAverage_float_cm = 255.0;
+      }
+
       // round off and convert to int
       pingerData = (uint8_t) round(pingerAverage_float_cm);
+
+    } else {
+      // set to error
+      pingerData = (uint8_t) 255;
     }
 
     // if we weren't able to talk to the pinger
@@ -567,32 +555,32 @@ uint8_t readPinger() {
 }
 
 
+/************************ end station stuff ************************/
+#endif
 
 
 /************************ alarms ************************/
 
-bool justWokeUp = false;
+unsigned long wokeUpAtMillis;
+
+// bool justWokeUp = false;
 
 /************ alarm_one_routine ************/
 /*
-dummy routine.
 */
 void alarm_one_routine() {
-  justWokeUp = true;
+  // record the time at which we woke up
+  wokeUpAtMillis = millis();
 }
 
 
 
-/************ setAlarm_client ************/
+/************ setAlarm ************/
 /*
 Function to set RTC alarm
-
-takes:
-bool initFlag: indicates whether this is the initial instance of the alarm.
-If it is, then set the sample times as zero to sample first at the top of the interval
 */
 // bool initFlag
-void setAlarm_client() {
+void setAlarm(bool firstAlarm) {
 
   // always sample on the 0th second
   sc_RTC.setAlarmSeconds(0);
@@ -605,7 +593,7 @@ void setAlarm_client() {
       // increment our alarm minutes
       ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
 
-      // while we're still setting alarm in the past
+      // repeat while we're still setting alarm in the past
     } while (ALARM_MINUTES <= sc_RTC.getMinutes());
 
     // if we've rolled over
@@ -647,6 +635,16 @@ void setAlarm_client() {
     sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
   }
 
+  // if this is the first alarm
+  if (firstAlarm) {
+
+    // set it for midnight
+    sc_RTC.setAlarmSeconds(0);
+    sc_RTC.setAlarmMinutes(0);
+    sc_RTC.setAlarmHours(0);
+    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+  }
+
   sc_RTC.attachInterrupt(alarm_one_routine);
 }
 
@@ -654,7 +652,7 @@ void setAlarm_client() {
 
 /************ setAlarm_server ************/
 // Function to set RTC wakeup alarm for server side
-void setAlarm_server() {
+void setAlarm_server(bool firstAlarm) {
 
   // always wake up on the 0th second
   sc_RTC.setAlarmSeconds(0);
@@ -704,18 +702,21 @@ void setAlarm_server() {
 
     // and add an interval to get to the next one
     uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
-
-    // now subtract 1 because we're going to wake up SERVER_WAKE_DURATION/2 minutes before the hour
-    ALARM_HOURS = ALARM_HOURS - 1;
+    //
+    // // now subtract 1 because we're going to wake up SERVER_WAKE_DURATION/2 minutes before the hour
+    // ALARM_HOURS = ALARM_HOURS - 1;
 
     // if we've rolled over
     if (ALARM_HOURS >= 24) {
       // reset
       ALARM_HOURS = ALARM_HOURS - 24;
     }
+    //
+    // // now get the alarm minutes as 60 - SERVER_WAKE_DURATION/2
+    // ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATION/2);
 
-    // now get the alarm minutes as 60 - SERVER_WAKE_DURATIONOD/2
-    ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATION/2);
+    // sample on the 0th minute
+    ALARM_MINUTES = 0;
 
     // set minutes
     sc_RTC.setAlarmMinutes(ALARM_MINUTES);
@@ -726,22 +727,35 @@ void setAlarm_server() {
     sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
   }
 
+  // if this is the first alarm
+  if (firstAlarm) {
+
+    // set it for (server wake duration/2) before midnight
+    sc_RTC.setAlarmSeconds(0);
+    // ALARM_MINUTES = 60-ceil(SERVER_WAKE_DURATION/2);
+    ALARM_MINUTES = 0;
+    sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+    sc_RTC.setAlarmHours(0);
+    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+  }
+
   sc_RTC.attachInterrupt(alarm_one_routine);
 }
 
+
+
+
+// if we're the server
+#if STATION_ID == 0
 
 /************************ iridium ************************/
 
 #include <IridiumSBD.h>
 
-#define SBD_RECORD_ID           0xA0
-#define SBD_RECORD_VERSION      0x00
-#define SBD_RECORD_HEADER       (SBD_RECORD_ID | SBD_RECORD_VERSION)
-
-#define IRIDIUM_CS 9 // chip select pin for the iridium unit
-#define TRANSMISSION_INTERVAL 4   // 1 = hourly, 4 = every 4 hours
-#define IRIDIUM_ATTEMPTS 10
-#define IRIDIUM_RETRY_DELAY 20000 // 10 seconds
+#define IRIDIUM_CS 11 // chip select pin for the iridium unit
+// #define TRANSMISSION_INTERVAL 4   // 1 = hourly, 4 = every 4 hours
+#define IRIDIUM_ATTEMPTS 3
+#define IRIDIUM_RETRY_DELAY 20000 // 20 seconds
 
 int iridiumError;
 
@@ -750,8 +764,8 @@ IridiumSBD iridium(Serial1, IRIDIUM_CS);
 typedef union {
 
   struct {
-    int32_t timestamp;
     byte data[SIMB_DATASIZE]; // actual data
+    int32_t timestamp; // timestamp (unix time, from RTC)
 
   } __attribute__((packed));
 
@@ -761,7 +775,6 @@ typedef union {
 
 
 SBDMessage message;
-
 
 void clearMessage() {
 
@@ -781,6 +794,7 @@ void configureIridium(){
 }
 
 
+
 void iridiumOn() {
   pinMode(IRIDIUM_CS,OUTPUT);
   digitalWrite(IRIDIUM_CS, HIGH);
@@ -796,16 +810,40 @@ void iridiumOn() {
   iridium.begin();
 }
 
-void iridiumOff()
-{
+
+
+void iridiumOff() {
   digitalWrite(IRIDIUM_CS, LOW);
 }
 
-void sendIridium()
-{
+
+
+void sendIridium() {
   iridiumError  = -1;
 
-  iridiumError = iridium.sendSBDBinary(message.bytes, sizeof(message)); //actually transmit
+  int retries = 0;
+
+  // while we haven't successfully transmitted or exhausted our attempts
+  while ((retries < IRIDIUM_ATTEMPTS) and (iridiumError != 0)) {
+
+    // try to send the data
+    iridiumError = iridium.sendSBDBinary(message.bytes, sizeof(message));
+
+    // if we sent succesfully, break out of the loop
+    if (iridiumError = 0) {
+      break;
+    }
+
+    // otherwise increment our retries
+    retries += 1;
+
+    // then delay for a bit
+    delay(IRIDIUM_RETRY_DELAY);
+  }
 }
+
+// end server stuff
+#endif
+
 
 #endif
