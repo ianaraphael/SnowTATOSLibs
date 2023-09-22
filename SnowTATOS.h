@@ -12,13 +12,13 @@ ian.a.raphael.th@dartmouth.edu
 
 
 #define STATION_ID 0 // server is always 0
-#define TEST true // false for deployment
-#define IRIDIUM_ENABLE false // deactivate for testing
-uint8_t SAMPLING_INTERVAL_MIN = 240; // sampling interval in minutes
-uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
+#define TEST false // false for deployment
+#define IRIDIUM_ENABLE true // deactivate for testing
+static uint8_t SAMPLING_INTERVAL_MIN = 120; // sampling interval in minutes
+static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 
 #define NUM_TEMP_SENSORS 3 // number of sensors
-#define NUM_STATIONS 10 // number of nodes
+#define NUM_STATIONS 9 // number of nodes
 
 #define CLIENT_DATA_SIZE 7 // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
 
@@ -33,8 +33,6 @@ const int flashChipSelect = 4;
 /************ Board setup ************/
 void boardSetup() {
 
-  ALARM_MINUTES = 0;
-
   unsigned char pinNumber;
 
   // Pull up all unused pins to prevent floating vals
@@ -48,6 +46,9 @@ void boardSetup() {
   pinMode(26, INPUT_PULLUP);
   pinMode(13, OUTPUT);
   digitalWrite(13, LOW);
+
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
 
   // set our readout resolution
   analogReadResolution(12);
@@ -157,9 +158,9 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
 #include "RH_RF95.h"
 
 // radio presets
-#define RADIO_TIMEOUT 5000 // max wait time for radio transmissions in ms
+#define RADIO_TIMEOUT 10000 // max wait time for radio transmissions in ms
 #define RADIO_FREQ 915.0 // radio frequency
-#define RADIO_POWER 20 // max power
+#define RADIO_POWER 23 // max power
 
 // Radio pins
 #define RADIO_CS 5 // radio chip select pin
@@ -169,7 +170,7 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
 #define SERVER_ADDRESS 0
 #define RADIO_ID STATION_ID
 
-#define MAX_TRANSMISSION_ATTEMPTS 3 // maximum number of times for a client to retry sending data
+#define MAX_TRANSMISSION_ATTEMPTS 5 // maximum number of times for a client to retry sending data
 
 RH_RF95 driver(RADIO_CS, RADIO_INT); // Singleton instance of the radio driver
 RHReliableDatagram manager(driver, RADIO_ID); // Class to manage message delivery and receipt, using the driver declared above
@@ -180,14 +181,14 @@ Function to initialize the radio
 */
 bool init_Radio() {
 
+  // wait while the radio initializes
+  manager.init();
+  delay(1000);
+
   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
   // you can set transmitter powers from 5 to 23 dBm:
   driver.setTxPower(RADIO_POWER, false);
   driver.setFrequency(RADIO_FREQ);
-
-  // wait while the radio initializes
-  manager.init();
-  delay(1000);
 
   manager.setTimeout(RADIO_TIMEOUT); // set timeout
   manager.setRetries(MAX_TRANSMISSION_ATTEMPTS);
@@ -247,8 +248,6 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
 #include <TimeLib.h>
 #include <RTCZero.h>
 RTCZero sc_RTC; // real time clock object
-
-uint8_t ALARM_MINUTES; // minute to sample on
 
 // bool synchronizedWithNetwork = false;
 
@@ -322,6 +321,231 @@ bool init_RTC() {
 
   return true;
 }
+
+
+/************************ alarms ************************/
+
+volatile uint8_t ALARM_MINUTES = 0; // minute to sample on
+volatile uint8_t ALARM_HOURS = 0; // hour to sample on
+volatile unsigned long wokeUpAtMillis; // clock time that we woke up on each cycle
+// bool justWokeUp = false;
+
+/************ alarm_one_routine ************/
+/*
+*/
+void alarm_one_routine() {
+  // record the time at which we woke up
+  wokeUpAtMillis = millis();
+}
+
+/************ setAlarm ************/
+/*
+Function to set RTC alarm
+*/
+// bool initFlag
+void setAlarm(bool firstAlarm) {
+
+  // always sample on the 0th second
+  sc_RTC.setAlarmSeconds(0);
+
+  // if this is the first alarm
+  if (firstAlarm) {
+
+    // set it for init time
+    sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+    sc_RTC.setAlarmHours(ALARM_HOURS);
+    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+
+    // attach the interrupt
+    sc_RTC.attachInterrupt(alarm_one_routine);
+
+    // and return early
+    return;
+  }
+
+  // figure out how many hours we need to add
+  byte addHours = floor(SAMPLING_INTERVAL_MIN/60);
+
+  // figure out how many minutes we need to add
+  byte addMinutes = SAMPLING_INTERVAL_MIN - (addHours * 60);
+
+  // add them
+  ALARM_HOURS += addHours;
+  ALARM_MINUTES += addMinutes;
+
+  // if we rolled over hours
+  if (ALARM_HOURS >= 24){
+    // reset within 24 hour time window
+    ALARM_HOURS -= 24;
+  }
+
+  // if we rolled over minutes
+  if (ALARM_MINUTES >= 60) {
+    // reset within 60 minute time window
+    ALARM_MINUTES -= 60;
+  }
+
+  // set minutes
+  sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+  // and set hours
+  sc_RTC.setAlarmHours(ALARM_HOURS);
+
+  if (SAMPLING_INTERVAL_MIN < 60) { // faster than hourly
+    sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
+  } else if (SAMPLING_INTERVAL_MIN >= 60) { // hourly or slower
+    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+  }
+
+  // attach the interrupt
+  sc_RTC.attachInterrupt(alarm_one_routine);
+
+  // // if we're sampling at less than an hourly rate
+  // if (SAMPLING_INTERVAL_MIN < 60) {
+  //
+  //   do {
+  //
+  //     // increment our alarm minutes
+  //     ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
+  //
+  //     // repeat while we're still setting alarm in the past
+  //   } while (ALARM_MINUTES <= sc_RTC.getMinutes());
+  //
+  //   // if we've rolled over
+  //   if (ALARM_MINUTES >= 60) {
+  //     // reset to within the hour
+  //     ALARM_MINUTES = ALARM_MINUTES - 60;
+  //   }
+  //
+  //   // set the alarm
+  //   sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+  //
+  //   // and enable the alarm to match
+  //   sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
+  //
+  //   // otherwise if we're sampling with greater than 59 minute period
+  // } else if(SAMPLING_INTERVAL_MIN >= 60) {
+  //
+  //   // figure out how long our interval is in hours
+  //   uint8_t SAMPLING_INTERVAL_HOUR = SAMPLING_INTERVAL_MIN/60;
+  //
+  //   // get the current hour
+  //   uint8_t currHour = sc_RTC.getHours();
+  //
+  //   // add a sampling interval
+  //   uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
+  //
+  //   // if it has wrapped
+  //   if (ALARM_HOURS >= 24) {
+  //     // reset to the correct period
+  //     ALARM_HOURS = ALARM_HOURS - 24;
+  //   }
+  //
+  //   // sample on the 0th minute
+  //   sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+  //   // and set hours
+  //   sc_RTC.setAlarmHours(ALARM_HOURS);
+  //
+  //   // and enable the alarm to match
+  //   sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+  // }
+  //
+  // sc_RTC.attachInterrupt(alarm_one_routine);
+}
+
+
+
+/************ setAlarm_server ************/
+// Function to set RTC wakeup alarm for server side
+// void setAlarm_server(bool firstAlarm) {
+//
+//   // always wake up on the 0th second
+//   sc_RTC.setAlarmSeconds(0);
+//
+//   // if we're sampling at less than an hourly rate
+//   if (SAMPLING_INTERVAL_MIN < 60) {
+//
+//     do {
+//
+//       // increment our alarm minutes
+//       ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
+//
+//       // while we're still setting alarm in the past
+//     } while (ALARM_MINUTES <= sc_RTC.getMinutes());
+//
+//     // if we've rolled over
+//     if (ALARM_MINUTES >= 60) {
+//
+//       // reset to within the hour
+//       ALARM_MINUTES = ALARM_MINUTES - 60;
+//     }
+//
+//     // get the actual minute that we'll wake on (start of the wake period rather than the center)
+//     uint8_t ALARM_MINUTES_ACTUAL = ALARM_MINUTES-floor(SERVER_WAKE_DURATION/2);
+//
+//     // if we ended up with a negative number
+//     if (ALARM_MINUTES_ACTUAL < 0) {
+//
+//       // bring it back into the hour
+//       ALARM_MINUTES_ACTUAL = 60 + ALARM_MINUTES_ACTUAL;
+//     }
+//
+//     // then set the alarm
+//     sc_RTC.setAlarmMinutes(ALARM_MINUTES_ACTUAL);
+//
+//     // finally, enable the alarm to match
+//     sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
+//
+//     // otherwise
+//   } else if(SAMPLING_INTERVAL_MIN >= 60) {
+//
+//     // figure out how long our interval is in hours
+//     uint8_t SAMPLING_INTERVAL_HOUR = SAMPLING_INTERVAL_MIN/60;
+//
+//     // now figure out which sampling interval we're in
+//     uint8_t currHour = sc_RTC.getHours();
+//
+//     // and add an interval to get to the next one
+//     uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
+//     //
+//     // // now subtract 1 because we're going to wake up SERVER_WAKE_DURATION/2 minutes before the hour
+//     // ALARM_HOURS = ALARM_HOURS - 1;
+//
+//     // if we've rolled over
+//     if (ALARM_HOURS >= 24) {
+//       // reset
+//       ALARM_HOURS = ALARM_HOURS - 24;
+//     }
+//     //
+//     // // now get the alarm minutes as 60 - SERVER_WAKE_DURATION/2
+//     // ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATION/2);
+//
+//     // sample on the 0th minute
+//     ALARM_MINUTES = 0;
+//
+//     // set minutes
+//     sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+//     // set hours
+//     sc_RTC.setAlarmHours(ALARM_HOURS);
+//
+//     // and enable the alarm to match
+//     sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+//   }
+//
+//   // if this is the first alarm
+//   if (firstAlarm) {
+//
+//     // set it for (server wake duration/2) before midnight
+//     sc_RTC.setAlarmSeconds(0);
+//     // ALARM_MINUTES = 60-ceil(SERVER_WAKE_DURATION/2);
+//     ALARM_MINUTES = 0;
+//     sc_RTC.setAlarmMinutes(ALARM_MINUTES);
+//     sc_RTC.setAlarmHours(0);
+//     sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
+//   }
+//
+//   sc_RTC.attachInterrupt(alarm_one_routine);
+// }
+
 
 
 // if we're not the server
@@ -559,192 +783,8 @@ uint8_t readPinger() {
 #endif
 
 
-/************************ alarms ************************/
 
-unsigned long wokeUpAtMillis;
-
-// bool justWokeUp = false;
-
-/************ alarm_one_routine ************/
-/*
-*/
-void alarm_one_routine() {
-  // record the time at which we woke up
-  wokeUpAtMillis = millis();
-}
-
-
-
-/************ setAlarm ************/
-/*
-Function to set RTC alarm
-*/
-// bool initFlag
-void setAlarm(bool firstAlarm) {
-
-  // always sample on the 0th second
-  sc_RTC.setAlarmSeconds(0);
-
-  // if we're sampling at less than an hourly rate
-  if (SAMPLING_INTERVAL_MIN < 60) {
-
-    do {
-
-      // increment our alarm minutes
-      ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
-
-      // repeat while we're still setting alarm in the past
-    } while (ALARM_MINUTES <= sc_RTC.getMinutes());
-
-    // if we've rolled over
-    if (ALARM_MINUTES >= 60) {
-      // reset to within the hour
-      ALARM_MINUTES = ALARM_MINUTES - 60;
-    }
-
-    // set the alarm
-    sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-
-    // and enable the alarm to match
-    sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
-
-    // otherwise if we're sampling with greater than 59 minute period
-  } else if(SAMPLING_INTERVAL_MIN >= 60) {
-
-    // figure out how long our interval is in hours
-    uint8_t SAMPLING_INTERVAL_HOUR = SAMPLING_INTERVAL_MIN/60;
-
-    // get the current hour
-    uint8_t currHour = sc_RTC.getHours();
-
-    // add a sampling interval
-    uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
-
-    // if it has wrapped
-    if (ALARM_HOURS >= 24) {
-      // reset to the correct period
-      ALARM_HOURS = ALARM_HOURS - 24;
-    }
-
-    // sample on the 0th minute
-    sc_RTC.setAlarmMinutes(0);
-    // and set hours
-    sc_RTC.setAlarmHours(ALARM_HOURS);
-
-    // and enable the alarm to match
-    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-  }
-
-  // if this is the first alarm
-  if (firstAlarm) {
-
-    // set it for midnight
-    sc_RTC.setAlarmSeconds(0);
-    sc_RTC.setAlarmMinutes(0);
-    sc_RTC.setAlarmHours(0);
-    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-  }
-
-  sc_RTC.attachInterrupt(alarm_one_routine);
-}
-
-
-
-/************ setAlarm_server ************/
-// Function to set RTC wakeup alarm for server side
-void setAlarm_server(bool firstAlarm) {
-
-  // always wake up on the 0th second
-  sc_RTC.setAlarmSeconds(0);
-
-  // if we're sampling at less than an hourly rate
-  if (SAMPLING_INTERVAL_MIN < 60) {
-
-    do {
-
-      // increment our alarm minutes
-      ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
-
-      // while we're still setting alarm in the past
-    } while (ALARM_MINUTES <= sc_RTC.getMinutes());
-
-    // if we've rolled over
-    if (ALARM_MINUTES >= 60) {
-
-      // reset to within the hour
-      ALARM_MINUTES = ALARM_MINUTES - 60;
-    }
-
-    // get the actual minute that we'll wake on (start of the wake period rather than the center)
-    uint8_t ALARM_MINUTES_ACTUAL = ALARM_MINUTES-floor(SERVER_WAKE_DURATION/2);
-
-    // if we ended up with a negative number
-    if (ALARM_MINUTES_ACTUAL < 0) {
-
-      // bring it back into the hour
-      ALARM_MINUTES_ACTUAL = 60 + ALARM_MINUTES_ACTUAL;
-    }
-
-    // then set the alarm
-    sc_RTC.setAlarmMinutes(ALARM_MINUTES_ACTUAL);
-
-    // finally, enable the alarm to match
-    sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
-
-    // otherwise
-  } else if(SAMPLING_INTERVAL_MIN >= 60) {
-
-    // figure out how long our interval is in hours
-    uint8_t SAMPLING_INTERVAL_HOUR = SAMPLING_INTERVAL_MIN/60;
-
-    // now figure out which sampling interval we're in
-    uint8_t currHour = sc_RTC.getHours();
-
-    // and add an interval to get to the next one
-    uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
-    //
-    // // now subtract 1 because we're going to wake up SERVER_WAKE_DURATION/2 minutes before the hour
-    // ALARM_HOURS = ALARM_HOURS - 1;
-
-    // if we've rolled over
-    if (ALARM_HOURS >= 24) {
-      // reset
-      ALARM_HOURS = ALARM_HOURS - 24;
-    }
-    //
-    // // now get the alarm minutes as 60 - SERVER_WAKE_DURATION/2
-    // ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATION/2);
-
-    // sample on the 0th minute
-    ALARM_MINUTES = 0;
-
-    // set minutes
-    sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-    // set hours
-    sc_RTC.setAlarmHours(ALARM_HOURS);
-
-    // and enable the alarm to match
-    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-  }
-
-  // if this is the first alarm
-  if (firstAlarm) {
-
-    // set it for (server wake duration/2) before midnight
-    sc_RTC.setAlarmSeconds(0);
-    // ALARM_MINUTES = 60-ceil(SERVER_WAKE_DURATION/2);
-    ALARM_MINUTES = 0;
-    sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-    sc_RTC.setAlarmHours(0);
-    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-  }
-
-  sc_RTC.attachInterrupt(alarm_one_routine);
-}
-
-
-
-
+/************************ server stuff ************************/
 // if we're the server
 #if STATION_ID == 0
 
@@ -842,8 +882,8 @@ void sendIridium() {
   }
 }
 
-// end server stuff
+/************************ end server stuff ************************/
 #endif
 
-
+/************************ end header file ************************/
 #endif
