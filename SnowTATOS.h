@@ -11,7 +11,7 @@ ian.a.raphael.th@dartmouth.edu
 #define SnowTATOS_h
 
 
-#define STATION_ID 0 // server is always 0
+#define STATION_ID 1 // server is always 0
 #define TEST false // false for deployment
 #define IRIDIUM_ENABLE true // deactivate for testing
 static uint8_t SAMPLING_INTERVAL_MIN = 120; // sampling interval in minutes
