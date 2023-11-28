@@ -1,9 +1,11 @@
 /*
 
-A library for functions common to snowtatos ArcWatch_v1 server and client
+A library for functions common to snowtatos server and client
+
+Updated for Rocket Scream Mini Ultra LoRa board
 
 Ian Raphael
-2023.06.16
+2023.11.28
 ian.a.raphael.th@dartmouth.edu
 
 */
@@ -12,54 +14,48 @@ ian.a.raphael.th@dartmouth.edu
 
 
 #define STATION_ID 1 // server is always 0
-#define TEST false // false for deployment
-#define IRIDIUM_ENABLE true // deactivate for testing
+#define TEST true // false for deployment
+#define IRIDIUM_ENABLE false // deactivate for testing
+#define simbDeployment true // true it deploying system with SIMB
 static uint8_t SAMPLING_INTERVAL_MIN = 120; // sampling interval in minutes
 static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 
-#define NUM_TEMP_SENSORS 3 // number of sensors
+#define NUM_TEMP_SENSORS 0 // number of sensors
 #define NUM_STATIONS 9 // number of nodes
 
-#define CLIENT_DATA_SIZE 7 // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
+#define CLIENT_DATA_SIZE NUM_TEMP_SENSORS*2 + 1 // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
 
 #define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
 
 /************************ board ************************/
-
-
-const int flashChipSelect = 4;
-#include <SerialFlash.h>
 
 /************ Board setup ************/
 void boardSetup() {
 
   unsigned char pinNumber;
 
-  // Pull up all unused pins to prevent floating vals
-  for (pinNumber = 0; pinNumber < 23; pinNumber++) {
-    pinMode(pinNumber, INPUT_PULLUP);
-  }
-  for (pinNumber = 32; pinNumber < 42; pinNumber++) {
-    pinMode(pinNumber, INPUT_PULLUP);
-  }
-  pinMode(25, INPUT_PULLUP);
-  pinMode(26, INPUT_PULLUP);
-  pinMode(13, OUTPUT);
-  digitalWrite(13, LOW);
+  // TODO: update these pin numbers
+  // // Pull up all unused pins to prevent floating vals
+  // for (pinNumber = 0; pinNumber < 23; pinNumber++) {
+  //   pinMode(pinNumber, INPUT_PULLUP);
+  // }
+  // for (pinNumber = 32; pinNumber < 42; pinNumber++) {
+  //   pinMode(pinNumber, INPUT_PULLUP);
+  // }
+  // pinMode(25, INPUT_PULLUP);
+  // pinMode(26, INPUT_PULLUP);
+  // pinMode(13, OUTPUT);
+  // digitalWrite(13, LOW);
 
-  pinMode(4, OUTPUT);
-  digitalWrite(4, HIGH);
+  // pinMode(4, OUTPUT);
+  // digitalWrite(4, HIGH);
 
   // set our readout resolution
   analogReadResolution(12);
-
-  // put the flash chip to sleep since we are using SD
-  SerialFlash.begin(flashChipSelect);
-  SerialFlash.sleep();
 }
 
 
-
+// TODO: update mask to be flexible with/without temperature sensors
 // creates a default "error mask" that paints every value with the standard error value
 void maskSimbData(uint8_t *simbDataBuffer) {
 
@@ -85,7 +81,7 @@ void maskSimbData(uint8_t *simbDataBuffer) {
 
 
 
-
+// TODO: update to be flexible with and without temperature sensors
 // pack the provided client data into the radio transmission buffer
 void packClientData(float *tempData, uint8_t pingerData, uint8_t *dataBuffer) {
 
@@ -209,6 +205,36 @@ bool sendData_fromClient(uint8_t *data) {
   }
 }
 
+
+/************ syncWithServer ************/
+/*
+function to sync up with the server
+*/
+bool attemptSyncWithServer() {
+
+  // if the manager isn't busy right now
+  if (manager.available()) {
+
+    // allocate a throwaway buffer to put the message in (we don't need it)
+    buf[2];
+
+    // allocate a short to store station id
+    uint8_t from;
+
+    // if we've gotten a message
+    if (manager.recvfromAck(buf, sizeof(buf), &from)) {
+
+      // if it's from the server
+      if (from == 0) {
+        // we've synced with the server
+        return true;
+      }
+    }
+  }
+  // we have not synced with the server
+  return false;
+}
+
 /************ server radio receipt ************/
 /*
 function to receive a byte stream from a client by radio
@@ -245,306 +271,72 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
 /************************ rtc ************************/
 
 
-#include <TimeLib.h>
-#include <RTCZero.h>
-RTCZero sc_RTC; // real time clock object
+#include <RocketScream_LowPowerAVRZero.h>
+#include <RocketScream_RTCAVRZero.h>
 
-// bool synchronizedWithNetwork = false;
-
-/************ getTime() ************/
-/*
-Function to parse time from system __TIME__ string. From Paul Stoffregen
-DS1307RTC library example SetTime.ino
-*/
-bool getTime(const char *str, uint8_t* timeArray) {
-  int Hour, Min, Sec;
-
-  if (sscanf(str, "%d:%d:%d", &Hour, &Min, &Sec) != 3) return false;
-
-  // pack everything into a return array
-  timeArray[1] = (uint8_t) Hour;
-  timeArray[2] = (uint8_t) Min;
-  timeArray[3] = (uint8_t) Sec;
-
-  return true;
-}
-
-/************ getDate() ************/
-/*
-Function to parse date from system __TIME__ string. Modified from Paul
-Stoffregen's DS1307RTC library example SetTime.ino
-*/
-bool getDate(const char *str, uint8_t *dateArray) {
-  char Month[12];
-  int Day, Year;
-  uint8_t monthIndex;
-
-  const char *monthName[12] = {
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-  };
-
-  if (sscanf(str, "%s %d %d", Month, &Day, &Year) != 3) return false;
-  for (monthIndex = 0; monthIndex < 12; monthIndex++) {
-    if (strcmp(Month, monthName[monthIndex]) == 0) break;
-  }
-  if (monthIndex >= 12) return false;
-
-  // convert the int year into a string
-  String twoDigitYear = String(Year);
-  // extract the last two digits of the year
-  twoDigitYear = twoDigitYear.substring(2);
-
-  // pack everything into a return array as uint8_ts
-  dateArray[1] = (uint8_t) twoDigitYear.toInt();
-  dateArray[2] = monthIndex + 1;
-  dateArray[3] = (uint8_t) Day;
-
-  return true;
-}
+bool syncedWithServer = false;
 
 /************ init_RTC() ************/
 /*
-Function to init the RTC and sync to compile-time timestamp
+Function to init the real time counter
 */
 bool init_RTC() {
-
-  // get the date and time the compiler was run
-  uint8_t dateArray[3];
-  uint8_t timeArray[3];
-  getDate(__DATE__, dateArray);
-  getTime(__TIME__, timeArray);
-
-  sc_RTC.begin();
-  sc_RTC.setTime(timeArray[1], timeArray[2], timeArray[3]);
-  sc_RTC.setDate(dateArray[3], dateArray[2], dateArray[1]);
-
-  return true;
+  /* true: external 32.768 kHz crystal */
+  /* false: internal 32.768 kHz ULP oscillator */
+  RTCAVRZero.begin(false);
 }
 
 
 /************************ alarms ************************/
-
-volatile uint8_t ALARM_MINUTES = 0; // minute to sample on
-volatile uint8_t ALARM_HOURS = 0; // hour to sample on
-volatile unsigned long wokeUpAtMillis; // clock time that we woke up on each cycle
-// bool justWokeUp = false;
+bool timeToSleep_server = false;
 
 /************ alarm_one_routine ************/
 /*
 */
 void alarm_one_routine() {
   // record the time at which we woke up
-  wokeUpAtMillis = millis();
+  timeToSleep_server = false;
 }
 
-/************ setAlarm ************/
+/************ alarm_two_routine ************/
 /*
-Function to set RTC alarm
 */
-// bool initFlag
-void setAlarm(bool firstAlarm) {
+void alarm_two_routine() {
+  timeToSleep_server = true;
+}
 
-  // always sample on the 0th second
-  sc_RTC.setAlarmSeconds(0);
+/************ setSleepAlarm ************/
+/*
+Function to set RTC alarm to wake up for the next comms session
+*/
+void setSleepAlarm() {
 
-  // if this is the first alarm
-  if (firstAlarm) {
-
-    // set it for init time
-    sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-    sc_RTC.setAlarmHours(ALARM_HOURS);
-    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-
-    // attach the interrupt
-    sc_RTC.attachInterrupt(alarm_one_routine);
-
-    // and return early
-    return;
+  // if we are the server
+  if(station_ID == 0) {
+    // set the alarm for (SAMPLING_INTERVAL_MIN-SERVER_WAKE_DURATION)
+    uint16_t secondsUntilNextAlarm = (SAMPLING_INTERVAL_MIN - SERVER_WAKE_DURATION)*60;
+    RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
+  } else {
+    // otherwise we're a node, set it for the standard interval
+    uint16_t secondsUntilNextAlarm = SAMPLING_INTERVAL_MIN * 60;
+    RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
   }
-
-  // figure out how many hours we need to add
-  byte addHours = floor(SAMPLING_INTERVAL_MIN/60);
-
-  // figure out how many minutes we need to add
-  byte addMinutes = SAMPLING_INTERVAL_MIN - (addHours * 60);
-
-  // add them
-  ALARM_HOURS += addHours;
-  ALARM_MINUTES += addMinutes;
-
-  // if we rolled over hours
-  if (ALARM_HOURS >= 24){
-    // reset within 24 hour time window
-    ALARM_HOURS -= 24;
-  }
-
-  // if we rolled over minutes
-  if (ALARM_MINUTES >= 60) {
-    // reset within 60 minute time window
-    ALARM_MINUTES -= 60;
-  }
-
-  // set minutes
-  sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-  // and set hours
-  sc_RTC.setAlarmHours(ALARM_HOURS);
-
-  if (SAMPLING_INTERVAL_MIN < 60) { // faster than hourly
-    sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
-  } else if (SAMPLING_INTERVAL_MIN >= 60) { // hourly or slower
-    sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-  }
-
-  // attach the interrupt
-  sc_RTC.attachInterrupt(alarm_one_routine);
-
-  // // if we're sampling at less than an hourly rate
-  // if (SAMPLING_INTERVAL_MIN < 60) {
-  //
-  //   do {
-  //
-  //     // increment our alarm minutes
-  //     ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
-  //
-  //     // repeat while we're still setting alarm in the past
-  //   } while (ALARM_MINUTES <= sc_RTC.getMinutes());
-  //
-  //   // if we've rolled over
-  //   if (ALARM_MINUTES >= 60) {
-  //     // reset to within the hour
-  //     ALARM_MINUTES = ALARM_MINUTES - 60;
-  //   }
-  //
-  //   // set the alarm
-  //   sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-  //
-  //   // and enable the alarm to match
-  //   sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
-  //
-  //   // otherwise if we're sampling with greater than 59 minute period
-  // } else if(SAMPLING_INTERVAL_MIN >= 60) {
-  //
-  //   // figure out how long our interval is in hours
-  //   uint8_t SAMPLING_INTERVAL_HOUR = SAMPLING_INTERVAL_MIN/60;
-  //
-  //   // get the current hour
-  //   uint8_t currHour = sc_RTC.getHours();
-  //
-  //   // add a sampling interval
-  //   uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
-  //
-  //   // if it has wrapped
-  //   if (ALARM_HOURS >= 24) {
-  //     // reset to the correct period
-  //     ALARM_HOURS = ALARM_HOURS - 24;
-  //   }
-  //
-  //   // sample on the 0th minute
-  //   sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-  //   // and set hours
-  //   sc_RTC.setAlarmHours(ALARM_HOURS);
-  //
-  //   // and enable the alarm to match
-  //   sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-  // }
-  //
-  // sc_RTC.attachInterrupt(alarm_one_routine);
+  RTCAVRZero.attachInterrupt(alarm_one_routine());
+  // TODO: maybe go into standby mode here
+  // if we're the server, enable both the pin interrupt and the alarm
 }
 
 
-
-/************ setAlarm_server ************/
-// Function to set RTC wakeup alarm for server side
-// void setAlarm_server(bool firstAlarm) {
-//
-//   // always wake up on the 0th second
-//   sc_RTC.setAlarmSeconds(0);
-//
-//   // if we're sampling at less than an hourly rate
-//   if (SAMPLING_INTERVAL_MIN < 60) {
-//
-//     do {
-//
-//       // increment our alarm minutes
-//       ALARM_MINUTES = ALARM_MINUTES + SAMPLING_INTERVAL_MIN;
-//
-//       // while we're still setting alarm in the past
-//     } while (ALARM_MINUTES <= sc_RTC.getMinutes());
-//
-//     // if we've rolled over
-//     if (ALARM_MINUTES >= 60) {
-//
-//       // reset to within the hour
-//       ALARM_MINUTES = ALARM_MINUTES - 60;
-//     }
-//
-//     // get the actual minute that we'll wake on (start of the wake period rather than the center)
-//     uint8_t ALARM_MINUTES_ACTUAL = ALARM_MINUTES-floor(SERVER_WAKE_DURATION/2);
-//
-//     // if we ended up with a negative number
-//     if (ALARM_MINUTES_ACTUAL < 0) {
-//
-//       // bring it back into the hour
-//       ALARM_MINUTES_ACTUAL = 60 + ALARM_MINUTES_ACTUAL;
-//     }
-//
-//     // then set the alarm
-//     sc_RTC.setAlarmMinutes(ALARM_MINUTES_ACTUAL);
-//
-//     // finally, enable the alarm to match
-//     sc_RTC.enableAlarm(sc_RTC.MATCH_MMSS);
-//
-//     // otherwise
-//   } else if(SAMPLING_INTERVAL_MIN >= 60) {
-//
-//     // figure out how long our interval is in hours
-//     uint8_t SAMPLING_INTERVAL_HOUR = SAMPLING_INTERVAL_MIN/60;
-//
-//     // now figure out which sampling interval we're in
-//     uint8_t currHour = sc_RTC.getHours();
-//
-//     // and add an interval to get to the next one
-//     uint8_t ALARM_HOURS = currHour + SAMPLING_INTERVAL_HOUR;
-//     //
-//     // // now subtract 1 because we're going to wake up SERVER_WAKE_DURATION/2 minutes before the hour
-//     // ALARM_HOURS = ALARM_HOURS - 1;
-//
-//     // if we've rolled over
-//     if (ALARM_HOURS >= 24) {
-//       // reset
-//       ALARM_HOURS = ALARM_HOURS - 24;
-//     }
-//     //
-//     // // now get the alarm minutes as 60 - SERVER_WAKE_DURATION/2
-//     // ALARM_MINUTES = 60 - ceil(SERVER_WAKE_DURATION/2);
-//
-//     // sample on the 0th minute
-//     ALARM_MINUTES = 0;
-//
-//     // set minutes
-//     sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-//     // set hours
-//     sc_RTC.setAlarmHours(ALARM_HOURS);
-//
-//     // and enable the alarm to match
-//     sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-//   }
-//
-//   // if this is the first alarm
-//   if (firstAlarm) {
-//
-//     // set it for (server wake duration/2) before midnight
-//     sc_RTC.setAlarmSeconds(0);
-//     // ALARM_MINUTES = 60-ceil(SERVER_WAKE_DURATION/2);
-//     ALARM_MINUTES = 0;
-//     sc_RTC.setAlarmMinutes(ALARM_MINUTES);
-//     sc_RTC.setAlarmHours(0);
-//     sc_RTC.enableAlarm(sc_RTC.MATCH_HHMMSS);
-//   }
-//
-//   sc_RTC.attachInterrupt(alarm_one_routine);
-// }
+/************ setWakeAlarm ************/
+/*
+Function to set RTC alarm for server to go to sleep at the end of the comms session
+*/
+void setWakeAlarm() {
+  // set the time for the server wake duration
+  uint16_t secondsUntilNextAlarm = SERVER_WAKE_DURATION * 60;
+  RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
+  RTCAVRZero.attachInterrupt(alarm_two_routine());
+}
 
 
 
@@ -790,6 +582,9 @@ uint8_t readPinger() {
 
 /************************ iridium ************************/
 
+// if we're not deploying with the simb and we need iridium
+# if !simbDeployment
+
 #include <IridiumSBD.h>
 
 #define IRIDIUM_CS 11 // chip select pin for the iridium unit
@@ -881,6 +676,7 @@ void sendIridium() {
     delay(IRIDIUM_RETRY_DELAY);
   }
 }
+# endif
 
 /************************ end server stuff ************************/
 #endif
