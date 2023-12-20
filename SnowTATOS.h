@@ -8,12 +8,14 @@ Ian Raphael
 2023.11.28
 ian.a.raphael.th@dartmouth.edu
 
+TODO: get rid of Strings
+
 */
 #ifndef SnowTATOS_h
 #define SnowTATOS_h
 
 
-#define STATION_ID 1 // server is always 0
+#define STATION_ID 0 // server is always 0
 #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
@@ -21,11 +23,15 @@ static uint8_t SAMPLING_INTERVAL_MIN = 120; // sampling interval in minutes
 static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 
 #define NUM_TEMP_SENSORS 0 // number of sensors
-#define NUM_STATIONS 9 // number of nodes
+#define NUM_STATIONS 10 // number of nodes
 
-#define CLIENT_DATA_SIZE NUM_TEMP_SENSORS*2 + 1 // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
+#define CLIENT_DATA_SIZE ((NUM_TEMP_SENSORS*2) + 1) // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
 
 #define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
+
+
+#ifndef FORSIMB
+/****************** nothing below this line shared with SIMB ******************/
 
 /************************ board ************************/
 
@@ -55,11 +61,10 @@ void boardSetup() {
 }
 
 
-// TODO: update mask to be flexible with/without temperature sensors
 // creates a default "error mask" that paints every value with the standard error value
 void maskSimbData(uint8_t *simbDataBuffer) {
 
-  // create the standard "error" buffer
+  // create the standard "error" buffer vals
   uint8_t tempHighByte = highByte(uint16_t(32000));
   uint8_t tempLowByte = lowByte(uint16_t(32000));
   uint8_t pingerValue = uint8_t(255);
@@ -67,15 +72,15 @@ void maskSimbData(uint8_t *simbDataBuffer) {
   // for every station
   for (int i=1;i<=NUM_STATIONS;i++){
 
-    // paint error values
+    // get the start byte
     int startByte = (i-1)*CLIENT_DATA_SIZE;
-    simbDataBuffer[startByte] = tempHighByte;
-    simbDataBuffer[startByte+1] = tempLowByte;
-    simbDataBuffer[startByte+2] = tempHighByte;
-    simbDataBuffer[startByte+3] = tempLowByte;
-    simbDataBuffer[startByte+4] = tempHighByte;
-    simbDataBuffer[startByte+5] = tempLowByte;
-    simbDataBuffer[startByte+6] = pingerValue;
+
+    // for every temp sensor
+    for (int i2=0;i2<NUM_TEMP_SENSORS;i2++) {
+      simbDataBuffer[startByte+(i2*2)] = tempHighByte;
+      simbDataBuffer[startByte+(i2*2)+1] = tempLowByte;
+    }
+    simbDataBuffer[startByte+NUM_TEMP_SENSORS*2] = pingerValue;
   }
 }
 
@@ -94,7 +99,7 @@ void packClientData(float *tempData, uint8_t pingerData, uint8_t *dataBuffer) {
 
     // get the temp as an int *1000
     // multiply by 1000 (eg, -20.125*1000 = -20125.0)
-    int currTemp = tempData[i] * 1000;
+    int16_t currTemp = tempData[i] * 1000;
 
     // get the hi and lo byte
     uint8_t hiByte = highByte(currTemp);
@@ -147,123 +152,129 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
 }
 
 
-/************************ radio ************************/
-
-
-#include "RHReliableDatagram.h"
-#include "RH_RF95.h"
-
-// radio presets
-#define RADIO_TIMEOUT 10000 // max wait time for radio transmissions in ms
-#define RADIO_FREQ 915.0 // radio frequency
-#define RADIO_POWER 23 // max power
-
-// Radio pins
-#define RADIO_CS 5 // radio chip select pin
-#define RADIO_INT 2 // radio interrupt pin
-
-// server radio address is always 0
+// /************************ radio ************************/
+//
+//
+// #include "RHReliableDatagram.h"
+// #include "RH_RF95.h"
+//
+// // radio presets
+// #define RADIO_TIMEOUT 10000 // max wait time for radio transmissions in ms
+// #define RADIO_FREQ 915.0 // radio frequency
+// #define RADIO_POWER 23 // max power
+//
+// // Radio pins
+// #define RADIO_CS PD0 // radio chip select pin
+// #define RADIO_INT 2 // radio interrupt pin
+//
+// // server radio address is always 0
 #define SERVER_ADDRESS 0
 #define RADIO_ID STATION_ID
-
-#define MAX_TRANSMISSION_ATTEMPTS 5 // maximum number of times for a client to retry sending data
-
-RH_RF95 driver(RADIO_CS, RADIO_INT); // Singleton instance of the radio driver
-RHReliableDatagram manager(driver, RADIO_ID); // Class to manage message delivery and receipt, using the driver declared above
-
-/************ init_Radio() ************/
-/*
-Function to initialize the radio
-*/
-bool init_Radio() {
-
-  // wait while the radio initializes
-  manager.init();
-  delay(1000);
-
-  // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
-  // you can set transmitter powers from 5 to 23 dBm:
-  driver.setTxPower(RADIO_POWER, false);
-  driver.setFrequency(RADIO_FREQ);
-
-  manager.setTimeout(RADIO_TIMEOUT); // set timeout
-  manager.setRetries(MAX_TRANSMISSION_ATTEMPTS);
-
-  return true;
-}
-
-/************ client radio transmission ************/
-/*
-function to transmit a byte stream to server over rf95 radio
-*/
-bool sendData_fromClient(uint8_t *data) {
-
-  if(manager.sendtoWait(data,CLIENT_DATA_SIZE, SERVER_ADDRESS)){
-    return true;
-  } else {
-    return false;
-  }
-}
-
-
-/************ syncWithServer ************/
-/*
-function to sync up with the server
-*/
-bool attemptSyncWithServer() {
-
-  // if the manager isn't busy right now
-  if (manager.available()) {
-
-    // allocate a throwaway buffer to put the message in (we don't need it)
-    buf[2];
-
-    // allocate a short to store station id
-    uint8_t from;
-
-    // if we've gotten a message
-    if (manager.recvfromAck(buf, sizeof(buf), &from)) {
-
-      // if it's from the server
-      if (from == 0) {
-        // we've synced with the server
-        return true;
-      }
-    }
-  }
-  // we have not synced with the server
-  return false;
-}
-
-/************ server radio receipt ************/
-/*
-function to receive a byte stream from a client by radio
-*/
-int receiveData_fromClient(uint8_t* dataBuffer) {
-
-  // // memset the buffer to 0s to make sure we're
-  // memset(dataBuffer,0,sizeof(dataBuffer));
-
-  // if the manager isn't busy right now
-  if (manager.available()) {
-
-    // copy the size of the buffer
-    uint8_t len = CLIENT_DATA_SIZE;
-
-    // allocate a short to store station id
-    uint8_t from;
-
-    // if we've gotten a message, receive and store it, its length, and station id
-    if (manager.recvfromAck(dataBuffer, &len, &from)) {
-
-      // and return the station id
-      return from;
-    }
-  }
-
-  // otherwise return -1 (no message received)
-  return -1;
-}
+//
+// #define MAX_TRANSMISSION_ATTEMPTS 5 // maximum number of times for a client to retry sending data
+//
+// RH_RF95 driver(RADIO_CS, RADIO_INT); // Singleton instance of the radio driver
+// RHReliableDatagram manager(driver, RADIO_ID); // Class to manage message delivery and receipt, using the driver declared above
+//
+// /************ init_Radio() ************/
+// /*
+// Function to initialize the radio
+// */
+// bool init_Radio() {
+//
+//   // wait while the radio initializes
+//   manager.init();
+//   delay(1000);
+//
+//   // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
+//   // you can set transmitter powers from 5 to 23 dBm:
+//   driver.setTxPower(RADIO_POWER, false);
+//   driver.setFrequency(RADIO_FREQ);
+//
+//   manager.setTimeout(RADIO_TIMEOUT); // set timeout
+//   manager.setRetries(MAX_TRANSMISSION_ATTEMPTS);
+//
+//   return true;
+// }
+//
+// /************ client radio transmission ************/
+// /*
+// function to transmit a byte stream to server over rf95 radio
+// */
+// bool sendData_fromClient(uint8_t *data) {
+//
+//   if(manager.sendtoWait(data,CLIENT_DATA_SIZE, SERVER_ADDRESS)){
+//     return true;
+//   } else {
+//     return false;
+//   }
+// }
+//
+//
+// /************ syncWithServer ************/
+// /*
+// function to sync up with the server
+// */
+// bool attemptSyncWithServer() {
+//
+//   // set a timeout for 15 seconds
+//   setSyncTimeout((uint16_t)CLIENT_SYNC_TIMEOUT);
+//
+//   while (!syncTimedOut) {
+//     // if the manager isn't busy right now
+//     if (manager.available()) {
+//
+//       // allocate a throwaway buffer to put the message in (we don't need it)
+//       buf[10];
+//
+//       // allocate a short to store station id
+//       uint8_t from;
+//
+//       // if we've gotten a message
+//       if (manager.recvfromAck(buf, sizeof(buf), &from)) {
+//
+//         // if it's from the server
+//         if (from == 0) {
+//           // we've synced with the server
+//           return true;
+//         }
+//       }
+//     }
+//   }
+//
+//   // we timed out before syncing
+//   return false;
+// }
+//
+// /************ server radio receipt ************/
+// /*
+// function to receive a byte stream from a client by radio
+// */
+// int receiveData_fromClient(uint8_t* dataBuffer) {
+//
+//   // // memset the buffer to 0s to make sure we're
+//   // memset(dataBuffer,0,sizeof(dataBuffer));
+//
+//   // if the manager isn't busy right now
+//   if (manager.available()) {
+//
+//     // copy the size of the buffer
+//     uint8_t len = CLIENT_DATA_SIZE;
+//
+//     // allocate a short to store station id
+//     uint8_t from;
+//
+//     // if we've gotten a message, receive and store it, its length, and station id
+//     if (manager.recvfromAck(dataBuffer, &len, &from)) {
+//
+//       // and return the station id
+//       return from;
+//     }
+//   }
+//
+//   // otherwise return -1 (no message received)
+//   return -1;
+// }
 
 
 
@@ -274,6 +285,7 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
 #include <RocketScream_LowPowerAVRZero.h>
 #include <RocketScream_RTCAVRZero.h>
 
+#define CLIENT_SYNC_TIMEOUT 15 // number of seconds for client to spend on a sync attempt
 bool syncedWithServer = false;
 
 /************ init_RTC() ************/
@@ -288,42 +300,49 @@ bool init_RTC() {
 
 
 /************************ alarms ************************/
-bool timeToSleep_server = false;
+bool timeToSleep = false;
+bool justWokeUp = true;
 
-/************ alarm_one_routine ************/
+/************ wakeup_routine ************/
 /*
 */
-void alarm_one_routine() {
-  // record the time at which we woke up
-  timeToSleep_server = false;
+void wakeup_routine() {
+  timeToSleep = false;
+  justWokeUp = true;
 }
 
-/************ alarm_two_routine ************/
+/************ bedtime_routine ************/
 /*
 */
-void alarm_two_routine() {
-  timeToSleep_server = true;
+void bedtime_routine() {
+  timeToSleep = true;
+}
+
+bool syncTimedOut = false;
+syncTimeout_routine() {
+  // if we time out, this function is called and the flag is set
+  syncTimedOut = true;
 }
 
 /************ setSleepAlarm ************/
 /*
 Function to set RTC alarm to wake up for the next comms session
 */
-void setSleepAlarm() {
+void setSleepAlarm(uint16_t sleepDuration_minutes) {
 
   // if we are the server
-  if(station_ID == 0) {
+  if(STATION_ID == 0) {
+
     // set the alarm for (SAMPLING_INTERVAL_MIN-SERVER_WAKE_DURATION)
-    uint16_t secondsUntilNextAlarm = (SAMPLING_INTERVAL_MIN - SERVER_WAKE_DURATION)*60;
+    uint16_t secondsUntilNextAlarm = (sleepDuration_minutes - SERVER_WAKE_DURATION)*60;
     RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
+
   } else {
     // otherwise we're a node, set it for the standard interval
-    uint16_t secondsUntilNextAlarm = SAMPLING_INTERVAL_MIN * 60;
+    uint16_t secondsUntilNextAlarm = sleepDuration_minutes * 60;
     RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
   }
-  RTCAVRZero.attachInterrupt(alarm_one_routine());
-  // TODO: maybe go into standby mode here
-  // if we're the server, enable both the pin interrupt and the alarm
+  RTCAVRZero.attachInterrupt(wakeup_routine);
 }
 
 
@@ -331,11 +350,24 @@ void setSleepAlarm() {
 /*
 Function to set RTC alarm for server to go to sleep at the end of the comms session
 */
-void setWakeAlarm() {
+void setWakeAlarm(uint16_t wakeDurationMinutes) {
   // set the time for the server wake duration
-  uint16_t secondsUntilNextAlarm = SERVER_WAKE_DURATION * 60;
+  uint16_t secondsUntilNextAlarm = wakeDurationMinutes * 60;
   RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
-  RTCAVRZero.attachInterrupt(alarm_two_routine());
+  RTCAVRZero.attachInterrupt(bedtime_routine);
+
+  // flip our flag so we don't reset our alarm
+  justWokeUp = false;
+}
+
+/************ setSyncTimout ************/
+/*
+Function to set RTC alarm for client attempt
+*/
+void setSyncTimeout(uint16_t syncTimoutSeconds) {
+  syncTimedOut = false;
+  RTCAVRZero.enableAlarm(syncTimoutSeconds, false);
+  RTCAVRZero.attachInterrupt(syncTimeout_routine());
 }
 
 
@@ -580,105 +612,110 @@ uint8_t readPinger() {
 // if we're the server
 #if STATION_ID == 0
 
-/************************ iridium ************************/
 
-// if we're not deploying with the simb and we need iridium
-# if !simbDeployment
-
-#include <IridiumSBD.h>
-
-#define IRIDIUM_CS 11 // chip select pin for the iridium unit
-// #define TRANSMISSION_INTERVAL 4   // 1 = hourly, 4 = every 4 hours
-#define IRIDIUM_ATTEMPTS 3
-#define IRIDIUM_RETRY_DELAY 20000 // 20 seconds
-
-int iridiumError;
-
-IridiumSBD iridium(Serial1, IRIDIUM_CS);
-
-typedef union {
-
-  struct {
-    byte data[SIMB_DATASIZE]; // actual data
-    int32_t timestamp; // timestamp (unix time, from RTC)
-
-  } __attribute__((packed));
-
-  uint8_t bytes[0];
-
-} SBDMessage;
-
-
-SBDMessage message;
-
-void clearMessage() {
-
-  memset(message.bytes, 0, sizeof(message));
-
-}
-
-
-void configureIridium(){
-  Serial.println("Configuring the iridium");
-  iridium.attachConsole(Serial);
-  iridium.attachDiags(Serial);
-  Serial.println("after iridium begin");
-  iridium.setPowerProfile(0);
-  Serial.println("after set power profile");
-  iridium.useMSSTMWorkaround(false);
-}
-
-
-
-void iridiumOn() {
-  pinMode(IRIDIUM_CS,OUTPUT);
-  digitalWrite(IRIDIUM_CS, HIGH);
-
-  Serial.println("Turned on the iridium");
-
-  Serial1.begin(19200);
-
-  configureIridium();
-
-  Serial.println("configured the iridium");
-
-  iridium.begin();
-}
-
-
-
-void iridiumOff() {
-  digitalWrite(IRIDIUM_CS, LOW);
-}
-
-
-
-void sendIridium() {
-  iridiumError  = -1;
-
-  int retries = 0;
-
-  // while we haven't successfully transmitted or exhausted our attempts
-  while ((retries < IRIDIUM_ATTEMPTS) and (iridiumError != 0)) {
-
-    // try to send the data
-    iridiumError = iridium.sendSBDBinary(message.bytes, sizeof(message));
-
-    // if we sent succesfully, break out of the loop
-    if (iridiumError = 0) {
-      break;
-    }
-
-    // otherwise increment our retries
-    retries += 1;
-
-    // then delay for a bit
-    delay(IRIDIUM_RETRY_DELAY);
-  }
-}
-# endif
+// /************************ iridium stuff ************************/
+// // if we're not deploying with the simb and we need iridium
+// # if !simbDeployment
+//
+// #include <IridiumSBD.h>
+//
+// #define IRIDIUM_CS 11 // chip select pin for the iridium unit
+// // #define TRANSMISSION_INTERVAL 4   // 1 = hourly, 4 = every 4 hours
+// #define IRIDIUM_ATTEMPTS 3
+// #define IRIDIUM_RETRY_DELAY 20000 // 20 seconds
+//
+// int iridiumError;
+//
+// IridiumSBD iridium(Serial1, IRIDIUM_CS);
+//
+// typedef union {
+//
+//   struct {
+//     byte data[SIMB_DATASIZE]; // actual data
+//     int32_t timestamp; // timestamp (unix time, from RTC)
+//
+//   } __attribute__((packed));
+//
+//   uint8_t bytes[0];
+//
+// } SBDMessage;
+//
+//
+// SBDMessage message;
+//
+// void clearMessage() {
+//
+//   memset(message.bytes, 0, sizeof(message));
+//
+// }
+//
+//
+// void configureIridium(){
+//   Serial.println("Configuring the iridium");
+//   iridium.attachConsole(Serial);
+//   iridium.attachDiags(Serial);
+//   Serial.println("after iridium begin");
+//   iridium.setPowerProfile(0);
+//   Serial.println("after set power profile");
+//   iridium.useMSSTMWorkaround(false);
+// }
+//
+//
+//
+// void iridiumOn() {
+//   pinMode(IRIDIUM_CS,OUTPUT);
+//   digitalWrite(IRIDIUM_CS, HIGH);
+//
+//   Serial.println("Turned on the iridium");
+//
+//   Serial1.begin(19200);
+//
+//   configureIridium();
+//
+//   Serial.println("configured the iridium");
+//
+//   iridium.begin();
+// }
+//
+//
+//
+// void iridiumOff() {
+//   digitalWrite(IRIDIUM_CS, LOW);
+// }
+//
+//
+//
+// void sendIridium() {
+//   iridiumError  = -1;
+//
+//   int retries = 0;
+//
+//   // while we haven't successfully transmitted or exhausted our attempts
+//   while ((retries < IRIDIUM_ATTEMPTS) and (iridiumError != 0)) {
+//
+//     // try to send the data
+//     iridiumError = iridium.sendSBDBinary(message.bytes, sizeof(message));
+//
+//     // if we sent succesfully, break out of the loop
+//     if (iridiumError = 0) {
+//       break;
+//     }
+//
+//     // otherwise increment our retries
+//     retries += 1;
+//
+//     // then delay for a bit
+//     delay(IRIDIUM_RETRY_DELAY);
+//   }
+// }
+//
+// /************************ end iridium stuff ************************/
+// # endif
 
 /************************ end server stuff ************************/
+#endif
+
+/************************ end not shared with simb stuff ************************/
 #endif
 
 /************************ end header file ************************/
