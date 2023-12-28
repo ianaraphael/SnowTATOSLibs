@@ -48,6 +48,7 @@ void alertSensorController(){
   digitalWrite(SENSORCONTROLLER_CS,HIGH);
 }
 
+
 // updated 2023.12.18 to handle !! max 1 PACKET (32 bytes) !! of data
 void getDataFromSensorController(uint8_t dataBuf[]) {
 
