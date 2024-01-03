@@ -11,7 +11,7 @@ ian.a.raphael.th@dartmouth.edu
 #ifndef SnowTATOS_simbi2c_h
 #define SnowTATOS_simbi2c_h
 
-#define FORSIMB true
+#define FORSIMB
 #include "SnowTATOS.h"
 #include <Wire.h>
 

@@ -13,24 +13,34 @@ ian.a.raphael.th@dartmouth.edu
 #define SnowTATOS_h
 
 
+/***************************************************************************/
+/***************************** !USER SETTINGS! *****************************/
+/***************************************************************************/
 #define STATION_ID 0 // server is always 0
+#define SIMB_ID 1 // whichever SIMB buoy number this network is attached to
 #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
-static uint8_t SAMPLING_INTERVAL_MIN = 120; // sampling interval in minutes
+static uint8_t SAMPLING_INTERVAL_MIN = 60; // sampling interval in minutes
 static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
-
 #define NUM_TEMP_SENSORS 0 // number of sensors
 #define NUM_STATIONS 10 // number of nodes
 
-#define CLIENT_DATA_SIZE ((NUM_TEMP_SENSORS*2) + 1) // data size for each client transmission: 3temps * 2bytes + 1pinger*1byte
 
+
+#define PINGER_DATA_SIZE 2
+#define TEMP_DATA_SIZE 2
+#define VOLTAGE_DATA_SIZE 1
+#define CLIENT_DATA_SIZE ((NUM_TEMP_SENSORS*TEMP_DATA_SIZE) + PINGER_DATA_SIZE + VOLTAGE_DATA_SIZE) // data size for each client transmission: 3temps * 2bytes + 1pinger bytes*1bytes + 1voltage * 1byte
 #define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
 
+#define PINGER_THRESHOLD_VALUE 2000 // threshold over which we do not consider data. 2000 mm (2 m) for now
+#define PINGER_ERROR_VALUE 5000 // default error value
+#define VOLTAGE_ERROR_VALUE 255 // max 8bit val
+#define TEMP_ERROR_VALUE 32000 // +32 degrees
 
-#ifndef FORSIMB
 /****************** nothing below this line shared with SIMB ******************/
-
+#ifndef FORSIMB
 
 
 /***************************************************************************/
@@ -39,6 +49,11 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 
 /************ Board setup ************/
 void boardSetup() {
+
+  analogReadResolution(12);
+
+  // generate a random seed value off of a floating analog pin
+  randomSeed(analogRead(17));
 
   unsigned char pinNumber;
 
@@ -59,7 +74,17 @@ void boardSetup() {
   // digitalWrite(4, HIGH);
 
   // set our readout resolution
-  analogReadResolution(12);
+}
+
+
+// function to get battery voltage
+float readBatteryVoltage(){
+
+  // get the voltage
+  float voltage = (((float) analogRead(A5) / 1024) * 6.6);
+
+  // and return
+  return voltage;
 }
 
 
@@ -67,30 +92,40 @@ void boardSetup() {
 void maskSimbData(uint8_t *simbDataBuffer) {
 
   // create the standard "error" buffer vals
-  uint8_t tempHighByte = highByte(uint16_t(32000));
-  uint8_t tempLowByte = lowByte(uint16_t(32000));
-  uint8_t pingerValue = uint8_t(255);
+  uint8_t tempHighByte = highByte(uint16_t(TEMP_ERROR_VALUE));
+  uint8_t tempLowByte = lowByte(uint16_t(TEMP_ERROR_VALUE));
+  uint8_t pingerHighByte = highByte(uint16_t(PINGER_ERROR_VALUE));
+  uint8_t pingerLowByte = lowByte(uint16_t(PINGER_ERROR_VALUE));
+  uint8_t voltageValue = uint8_t(VOLTAGE_ERROR_VALUE);
+
 
   // for every station
   for (int i=1;i<=NUM_STATIONS;i++){
 
     // get the start byte
-    int startByte = (i-1)*CLIENT_DATA_SIZE;
+    int tempStartByte = (i-1)*CLIENT_DATA_SIZE;
 
     // for every temp sensor
     for (int i2=0;i2<NUM_TEMP_SENSORS;i2++) {
-      simbDataBuffer[startByte+(i2*2)] = tempHighByte;
-      simbDataBuffer[startByte+(i2*2)+1] = tempLowByte;
+      // pack the high and low byte
+      simbDataBuffer[tempStartByte+(i2*2)] = tempHighByte;
+      simbDataBuffer[tempStartByte+(i2*2)+1] = tempLowByte;
     }
-    simbDataBuffer[startByte+NUM_TEMP_SENSORS*2] = pingerValue;
+
+    // get the pinger start byte
+    int pingerStartByte = tempStartByte+NUM_TEMP_SENSORS*TEMP_DATA_SIZE;
+    // pack the pinger high and low byte
+    simbDataBuffer[pingerStartByte] = pingerHighByte;
+    simbDataBuffer[pingerStartByte+1] = pingerLowByte;
+
+    // pack the voltage byte
+    simbDataBuffer[pingerStartByte+PINGER_DATA_SIZE] = voltageValue;
   }
 }
 
 
-
-// TODO: update to be flexible with and without temperature sensors
 // pack the provided client data into the radio transmission buffer
-void packClientData(float *tempData, uint8_t pingerData, uint8_t *dataBuffer) {
+void packClientData(float *tempData, uint16_t pingerData, float voltage, uint8_t *dataBuffer) {
 
   // for every temp
   for (int i = 0; i<NUM_TEMP_SENSORS;i++){
@@ -112,10 +147,18 @@ void packClientData(float *tempData, uint8_t pingerData, uint8_t *dataBuffer) {
     dataBuffer[loIndex] = loByte;
   }
 
-  // put pinger data in last
-  dataBuffer[2*NUM_TEMP_SENSORS] = pingerData;
-}
+  // put pinger data in after temp data
+  int pingerHiIndex = TEMP_DATA_SIZE*NUM_TEMP_SENSORS;
+  int pingerLoIndex = pingerHiIndex+1;
+  dataBuffer[pingerHiIndex] = highByte(pingerData);
+  dataBuffer[pingerLoIndex] = lowByte(pingerData);
 
+  // multiply voltage by ten and round to a short (so 3.35 v becomes 34, e.g., and later converts back to 3.4)
+  uint8_t voltageByte_times10 = round(voltage*10);
+
+  // put it in the buffer
+  dataBuffer[pingerHiIndex + PINGER_DATA_SIZE] = voltageByte_times10;
+}
 
 
 
@@ -143,14 +186,43 @@ void unpackTempData(uint8_t *dataBuffer, float *tempArray, int stnID) {
 }
 
 // unpack pinger data for a particular client from the simb buffer
-uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
+uint16_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
+
+  // get the start index for this station's data
+  int startByte = (stnID-1)*CLIENT_DATA_SIZE;
+
+  // then get the pinger indices
+  int pingerHiByte = startByte+(NUM_TEMP_SENSORS*TEMP_DATA_SIZE);
+  int pingerLoByte = pingerHiByte + 1;
+
+  // get the high byte
+  uint8_t hiByte = dataBuffer[pingerHiByte];
+
+  // get the low byte
+  uint8_t loByte = dataBuffer[pingerLoByte];
+
+  // put them together
+  uint16_t pingerRange_mm = (hiByte << 8) | (0x00ff & loByte);
+
+  // return the pinger value
+  return pingerRange_mm;
+}
+
+// unpack voltage data data for a particular client from the simb buffer
+float unpackVoltageData(uint8_t *dataBuffer, int stnID) {
 
   // get the pinger index (last value for a given station)
   int startByte = (stnID-1)*CLIENT_DATA_SIZE;
-  int pingerIndex = startByte+(CLIENT_DATA_SIZE-1);
+  int voltageIndex = startByte+(CLIENT_DATA_SIZE-VOLTAGE_DATA_SIZE);
+
+  // unpack the byte
+  uint8_t voltageByte_times10 = dataBuffer[voltageIndex];
+
+  // turn it into a float
+  float voltage = (float) voltageByte_times10/10.0;
 
   // return the pinger value
-  return dataBuffer[pingerIndex];
+  return voltage;
 }
 
 
@@ -165,13 +237,20 @@ uint8_t unpackPingerData(uint8_t *dataBuffer, int stnID) {
 // server radio address is always 0
 #define SERVER_ADDRESS 0
 #define RADIO_ID STATION_ID
+// #define CLIENT_SYNC_TIMEOUT 15
+#define CLIENT_SYNC_TIMEOUT_SECS 20 // number of seconds for client to spend on a sync attempt
+volatile bool syncedWithServer = false;
+int nFailedTransmits = 0;
+#define MAX_FAILED_TRANSMITS_TO_SYNC 2
+#define SYNC_TERM SERVER_ADDRESS
+#define ACK_TERM STATION_ID
 
 // radio presets
-#define RADIO_TIMEOUT 10000 // max time to spend in radio comms in ms
+// #define RADIO_TIMEOUT 10000 // max time to spend in radio comms in ms
 #define TRANSMISSION_TIMEOUT 1000 // max time to spend on individual transmit ms
 #define ACK_TIMEOUT 3000 // max time to wait for ack after transmit ms
 #define MAX_TRANSMISSION_ATTEMPTS 5 // maximum number of times for a client to retry sending data
-#define RADIO_FREQ 868.0 // radio frequency
+#define RADIO_FREQ 915.0 // radio frequency
 #define RADIO_BANDWIDTH 125.0
 #define RADIO_POWER 10
 // #define RADIO_POWER 23 // max power
@@ -186,6 +265,20 @@ SX1276 radio = new Module(RADIO_CS, RADIO_DIO, RADIOLIB_NC, RADIOLIB_NC);
 // save transmission state between loops
 int transmissionState = RADIOLIB_ERR_NONE;
 
+#if defined(ESP8266) || defined(ESP32)
+  ICACHE_RAM_ATTR
+#endif
+
+// flag to indicate that a packet was sent/received
+volatile bool packet_sentOrReceived = false;
+// this function is called when a complete packet is transmitted by the module
+// IMPORTANT: this function MUST be 'void' type and MUST NOT have any arguments!
+void setRadioFlag(void) {
+  // we sent a packet, set the flag
+  packet_sentOrReceived = true;
+}
+
+
 // radio.standby() to go to standby from sleep, or radio.startReceive()
 
 /************ init_Radio() ************/
@@ -194,145 +287,169 @@ Function to initialize the radio
 */
 int init_Radio() {
 
-  Serial2.print(F("[SX1276] Initializing ... "));
+  // Serial2.print(F("[SX1276] Initializing ... "));
   // init the radio
   // default settings viewable at: https://github.com/jgromes/RadioLib/wiki/Default-configuration#sx127xrfm9x---lora-modem
-  int state = radio.begin(RADIO_FREQ,RADIO_BANDWIDTH, 12, 7, 0x12, RADIO_POWER, 8, 0);
+  int state = radio.begin(RADIO_FREQ,RADIO_BANDWIDTH, 9, 7, 0x12, RADIO_POWER, 8, 0);
+  // int state = radio.begin(915.0, 125.0, 9, 7, 0x12, 10, 8, 0);
   if (state == RADIOLIB_ERR_NONE) {
-    Serial2.println(F("success!"));
+    Serial2.println(F("radio init'd successfully"));
   } else {
-    Serial2.print(F("failed, code "));
+    Serial2.print(F("radio init failed, code "));
     Serial2.println(state);
   }
 
   // set the functions that will be called when packet transmission/receival is finished
-  radio.setPacketSentAction(setTransmissionFlag);
-  radio.setPacketReceivedAction(setReceiveFlag);
+  radio.setDio0Action(setRadioFlag,RISING);
 
   return state;
 }
+
+
+/*
+send a packet with a timeout using radiolib
+*/
+bool sendPacketTimeout(byte *sendBuf,uint8_t len) {
+
+  // start the transmission
+  transmissionState = radio.startTransmit(sendBuf, len);
+
+  // get the start time
+  uint32_t transmitStartTime = millis();
+
+  // while we haven't timed out
+  while (millis()-transmitStartTime < TRANSMISSION_TIMEOUT) {
+
+    // check if the transmission is finished
+    if (packet_sentOrReceived) {
+
+      // if it finished without error
+      if (transmissionState == RADIOLIB_ERR_NONE) {
+        //
+        // // packet was successfully sent
+        // Serial.println(F("transmission finished!"));
+
+      } else {
+        //
+        // // otherwise it failed
+        // Serial.print(F("failed, code "));
+        // Serial.println(transmissionState);
+      }
+
+      // break out
+      break;
+    }
+  }
+
+  // if we failed to transmit
+  if (!packet_sentOrReceived) {
+    // return error
+    return false;
+  }
+
+  // first reset the transmission flag
+  packet_sentOrReceived = false;
+
+  // then return true
+  return true;
+}
+
 
 /************ client radio transmission ************/
 /*
 function to transmit a byte stream to server over lora
 
 blocks until ack or timeout
+returns:
+0 (successful, ack'd transmit)
+1 (transmit timout)
+2 (listening error)
+3 (ack packet read error)
+4 (ack timeout error)
 */
-bool sendData_fromClient(uint8_t *data) {
+int sendData_fromClient(uint8_t data[],uint8_t len) {
 
   // allocate a buffer to hold the data + 1 byte for station id
-  byte sendBuf[sizeof(data)+1];
+  byte sendBuf[len+1];
 
   // put our station ID in
-  sendBuf[0] = STATION_ID;
+  sendBuf[0] = (uint8_t) STATION_ID;
 
   // copy the data in
-  memcpy(sendBuf[1], data,sizeof(data));
+  memcpy(&sendBuf[1], data,len);
 
-  // get the start time
-  uint32_t transmitStartTime = millis();
   // start counting our attempts
   uint8_t transmissionAttempts = 0;
 
   // start a transmission attempt
   do {
 
-    // start the transmission
-    transmissionState = radio.startTransmit(sendBuf, CLIENT_DATA_SIZE);
-
-    // while we haven't timed out
-    while (millis()-transmitStartTime < TRANSMISSION_TIMEOUT) {
-
-      // check if the transmission is finished
-      if (packetTransmitted) {
-
-        // if it finished without error
-        if (transmissionState == RADIOLIB_ERR_NONE) {
-
-          // packet was successfully sent
-          Serial.println(F("transmission finished!"));
-
-        } else {
-
-          // otherwise it failed
-          Serial.print(F("failed, code "));
-          Serial.println(transmissionState);
-        }
-
-        // break out
-        break;
-      }
+    // try sending the packet
+    if (!sendPacketTimeout(sendBuf,sizeof(sendBuf))) {
+      // if we failed to transmit, return error 1 (transmit timout)
+      return 1;
     }
 
-    // clean up after transmission is finished
-    // this will ensure transmitter is disabled, RF switch is powered down etc.
-    radio.finishTransmit();
-
-    // if we failed to transmit
-    if (!packetTransmitted) {
-      // return error
-      return false;
-    }
-
-    // ...otherwise, success, we'll continue on to listen for an ack
-
-    // first reset the transmission flag
-    packetTransmitted = false;
-
-    // then start listening
-    state = radio.startReceive();
+    // otherwise, start listening
+    int state = radio.startReceive();
     if (state != RADIOLIB_ERR_NONE) {
-      // return error if we failed to start listening
-      return false;
+      // return error 2 if we failed to start listening
+      return 2;
     }
 
     // get our start time
     uint32_t ackWaitStartTime = millis();
 
     // while we haven't timed out waiting for the ack
-    while (millis() - ackWaitStartTime > ACK_TIMEOUT) {
+    while (millis() - ackWaitStartTime < ACK_TIMEOUT) {
 
       // check if the flag is set
-      if (packetReceived) {
+      if (packet_sentOrReceived) {
 
         // reset flag
-        packetReceived = false;
+        packet_sentOrReceived = false;
 
         // figure out how many bytes we received
         uint16_t numBytesReceived = radio.getPacketLength();
 
         // allocate an array to hold the data
-        byte ackArray[numBytes];
+        byte ackArray[numBytesReceived];
 
         // read the data into the array
         uint16_t state = radio.readData(ackArray, numBytesReceived);
 
         // if there was an error
         if (state != RADIOLIB_ERR_NONE) {
-          // return error
-          return false;
+          // return error 3 (ack packet read error)
+          return 3;
         }
 
         // otherwise, if the message is from the server
         if (ackArray[0] == (byte) SERVER_ADDRESS) {
 
-          // TODO: set syncedWithServer here since we got a message from the server we know it's awake
+          // if the ack term is valid
+          if (ackArray[1] == (uint8_t) ACK_TERM) {
 
-          // if the acknowledge bit is 0
-          if (ackArray[1] == 0) {
-            // return error
-            return false;
-          } else if (ackArray[1] == (byte) STATION_ID) { // otherwise if it's our station ID
-            // return success
-            return true;
+            // reset failed transmits count
+            nFailedTransmits = 0;
+
+            // return success (0)
+            return 0;
+
+          } else if (ackArray[1]==SYNC_TERM) {
+            // otherwise it's a sync message. set synced with server true
+            syncedWithServer = true;
           }
         }
-        // if we enter and fall through this control, we received a message
-        // from/for someone other than the server. continue listening.
+        // if we entered and fell through the above control, we received a message
+        // from someone other than the server or for someone else. continue listening.
       }
     }
 
-    // TODO: delay for a random moment to prevent intractable collisions
+    // get a random delay between 0.1 and 10 seconds to prevent intractable collisions
+    uint16_t clientTransmitDelay = random(100,10001);
+    uint32_t transmitDelayStartTime = millis();
+    while(millis() - transmitDelayStartTime < clientTransmitDelay);
 
     // increment our transmission attempts
     transmissionAttempts++;
@@ -340,25 +457,36 @@ bool sendData_fromClient(uint8_t *data) {
     // do another loop while we have not exceeded our transmission attempts
   } while (transmissionAttempts < MAX_TRANSMISSION_ATTEMPTS);
 
-  // return false if we exceeded transmission attempts
-  return false;
+  // increment the number of failed transmits if we make it here
+  nFailedTransmits++;
+
+  // and return error 4 if we exceeded transmission attempts
+  return 4;
 }
+
 
 
 /************ server radio receipt ************/
 /*
-function to receive a byte stream from a client by radio
+function to receive a byte array from a client by radio
 */
 int receiveData_fromClient(uint8_t* dataBuffer) {
 
   // copy the size of the buffer
-  uint8_t len = CLIENT_DATA_SIZE;
+  uint8_t len = sizeof(dataBuffer);
 
-  // allocate a short to store station id
-  uint8_t from;
+  // allocate an int to store the sender id
+  int from;
 
   // check if the flag is set
-  if (packetReceived) {
+  if (!packet_sentOrReceived) {
+    // if not, assign -1 (error/no packet received)
+    from = -1;
+
+    // Serial.println("Here1");
+
+    // otherwise, we received a packet
+  } else {
 
     // figure out how many bytes we received
     uint16_t numBytesReceived = radio.getPacketLength();
@@ -369,126 +497,88 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
     // read the data into the array
     uint16_t state = radio.readData(holdBuf, numBytesReceived);
 
-    // reset flag
-    packetReceived = false;
+    // reset the flag now that we have the data
+    packet_sentOrReceived = false;
 
     // if there was an error
     if (state != RADIOLIB_ERR_NONE) {
-      // return error/none received
-      return = -1;
+      // return error/no data received
+      return -1;
     }
 
     // get the sender ID
     from = holdBuf[0];
 
     // copy the data into the passed buffer excepting the leading byte (station ID)
-    memcpy(dataBuffer,holdBuf[1],sizeof(numBytesReceived)-1);
+    memcpy(dataBuffer,&holdBuf[1],numBytesReceived-1);
 
-    // TODO: send ack back to client
     // build an ack message
     byte ack[2];
-    ack[0] = SERVER_ADDRESS;
-    ack[1] = from;
+    ack[0] = STATION_ID; // own ID
+    ack[1] = from; // sender ID
 
     // transmit the acknowledgement
-    transmissionState = radio.startTransmit(ack, sizeof(ack));
+    sendPacketTimeout(ack,sizeof(ack));
 
-    //TODO: fix timer while we haven't timed out
-    while (millis()-transmitStartTime < TRANSMISSION_TIMEOUT) {
-
-      // check if the transmission is finished
-      if (packetTransmitted) {
-
-        // if it finished without error
-        if (transmissionState == RADIOLIB_ERR_NONE) {
-
-          // packet was successfully sent
-          Serial.println(F("transmission finished!"));
-
-        } else {
-
-          // otherwise it failed
-          Serial.print(F("failed, code "));
-          Serial.println(transmissionState);
-        }
-
-        // break out
-        break;
-      }
-    }
-
-    // clean up after transmission is finished
-    // this will ensure transmitter is disabled, RF switch is powered down etc.
-    radio.finishTransmit();
-
-
-    // return the sender ID
-    return from;
+    // start listening again
+    radio.startReceive();
   }
 
-  // otherwise return -1 (no message received)
-  return -1;
+  // return the sender ID
+  return from;
 }
 
 
-// /************ syncWithServer ************/
-// /*
-// function to sync up with the server
-// */
-// bool attemptSyncWithServer() {
-//
-//   // set a timeout for 15 seconds
-//   setSyncTimeout((uint16_t)CLIENT_SYNC_TIMEOUT);
-//
-//   while (!syncTimedOut) {
-//     // if the manager isn't busy right now
-//     if (manager.available()) {
-//
-//       // allocate a throwaway buffer to put the message in (we don't need it)
-//       buf[10];
-//
-//       // allocate a short to store station id
-//       uint8_t from;
-//
-//       // if we've gotten a message
-//       if (manager.recvfromAck(buf, sizeof(buf), &from)) {
-//
-//         // if it's from the server
-//         if (from == 0) {
-//           // we've synced with the server
-//           return true;
-//         }
-//       }
-//     }
-//   }
-//
-//   // we timed out before syncing
-//   return false;
-// }
-//
+/************ syncWithServer ************/
+/*
+function to sync up with the server
+*/
+bool attemptSyncWithServer() {
 
+  // save the current sync state
+  bool savedSyncState = syncedWithServer;
 
-#if defined(ESP8266) || defined(ESP32)
-  ICACHE_RAM_ATTR
-#endif
+  // reset the sync flag
+  syncedWithServer = false;
 
-// flag to indicate that a packet was sent
-volatile bool packetTransmitted = false;
-// this function is called when a complete packet is transmitted by the module
-// IMPORTANT: this function MUST be 'void' type and MUST NOT have any arguments!
-void setTransmissionFlag(void) {
-  // we sent a packet, set the flag
-  packetTransmitted = true;
+  // get the start time
+  uint32_t startTime = millis();
+
+  // while we haven't timed out, wait for a sync message from the server
+  while (millis() - startTime < (CLIENT_SYNC_TIMEOUT_SECS*1000)) {
+
+    // if we got a packet
+    if (packet_sentOrReceived) {
+
+      // reset flag
+      packet_sentOrReceived = false;
+
+      // figure out how many bytes we received
+      uint16_t numBytesReceived = radio.getPacketLength();
+
+      // allocate an array to hold the data
+      byte ackArray[numBytesReceived];
+
+      // read the data into the array
+      uint16_t state = radio.readData(ackArray, numBytesReceived);
+
+      // if the message is from the server
+      if (ackArray[0] == (byte) SERVER_ADDRESS) {
+        // if it's a sync message
+        if (ackArray[1]==SYNC_TERM) {
+          // set our flag true
+          syncedWithServer = true;
+          return true;
+        }
+      }
+    }
+  }
+
+  // otherwise, reset the state to whatever it was before and return failed sync
+  syncedWithServer = savedSyncState;
+  return false;
 }
 
-// flag to indicate that a packet was received
-volatile bool packetReceived = false;
-// this function is called when a complete packet is received by the module
-// IMPORTANT: this function MUST be 'void' type and MUST NOT have any arguments!
-void setReceiveFlag(void) {
-  // we got a packet, set the flag
-  packetReceived = true;
-}
 
 
 
@@ -499,9 +589,6 @@ void setReceiveFlag(void) {
 #include <RocketScream_LowPowerAVRZero.h>
 #include <RocketScream_RTCAVRZero.h>
 
-#define CLIENT_SYNC_TIMEOUT 15 // number of seconds for client to spend on a sync attempt
-bool syncedWithServer = false;
-
 /************ init_RTC() ************/
 /*
 Function to init the real time counter
@@ -509,7 +596,7 @@ Function to init the real time counter
 bool init_RTC() {
   /* true: external 32.768 kHz crystal */
   /* false: internal 32.768 kHz ULP oscillator */
-  RTCAVRZero.begin(false);
+  RTCAVRZero.begin(true);
 }
 
 
@@ -574,15 +661,15 @@ void setWakeAlarm(uint16_t wakeDurationMinutes) {
   justWokeUp = false;
 }
 
-/************ setSyncTimout ************/
-/*
-Function to set RTC alarm for client attempt
-*/
-void setSyncTimeout(uint16_t syncTimoutSeconds) {
-  syncTimedOut = false;
-  RTCAVRZero.enableAlarm(syncTimoutSeconds, false);
-  RTCAVRZero.attachInterrupt(syncTimeout_routine());
-}
+// /************ setSyncTimout ************/
+// /*
+// Function to set RTC alarm for client attempt
+// */
+// void setSyncTimeout(uint16_t syncTimoutSeconds) {
+//   syncTimedOut = false;
+//   RTCAVRZero.enableAlarm(syncTimoutSeconds, false);
+//   RTCAVRZero.attachInterrupt(syncTimeout_routine());
+// }
 
 
 
@@ -698,8 +785,8 @@ void readTemps(float* tempData) {
 #define N_PINGERSAMPLES 5 // number of samples to average for each pinger reading
 #define MAX_PINGER_SAMPLE_ATTEMPTS 30 // maximum number of samples to attempt in order to achieve N_PINGERSAMPLES successfully
 
-
-uint8_t readPinger() {
+// returns pinger range in mm
+uint16_t readPinger() {
 
   // write the power pin high
   pinMode(PINGER_POWER, OUTPUT);
@@ -780,50 +867,55 @@ uint8_t readPinger() {
           pingerRange_char[i-1] = pingerReadout[i];
         }
 
-        // convert the pinger reading to float cm
-        uint16_t pingerRange_long_mm = atoi(pingerRange_char);
-        float pingerRange_float_cm = (float)pingerReturn_long_mm/10;
+        // convert from ascii to an unsigned 16bit int
+        uint16_t pingerRange_mm = atoi(pingerRange_char);
 
-        // and add to the running sum
-        runningSum += pingerRange_float_cm;
+        // if it's greater than our threshold value
+        if (pingerRange_mm > PINGER_THRESHOLD_VALUE) {
+          // skip this one
+          continue;
+        }
 
-        // increment our counter
+        // otherwise add to the running sum
+        runningSum += pingerRange_mm;
+
+        // and increment our counter
         nGoodSamples++;
       }
 
       // while we have fewer than N_PINGERSAMPLES and we haven't timed out
-    } while (nGoodSamples < N_PINGERSAMPLES & nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
+    } while (nGoodSamples < N_PINGERSAMPLES && nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
 
 
     // if we got the req'd number of samples before timing out
     if (nGoodSamples >= N_PINGERSAMPLES) {
 
       // average the running sum
-      float pingerAverage_float_cm = runningSum/N_PINGERSAMPLES;
+      float pingerAverage_float_mm = (float)runningSum/N_PINGERSAMPLES;
 
       // TODO:\ check threshold value, make sure we are not including/passing error vals. max range
       // pinger to surface
       // send back two byte (mm res) value
 
-      // if it's greater than 255
-      if (pingerAverage_float_cm > 255.0) {
-        // set to 255
-        pingerAverage_float_cm = 255.0;
+      // if it's greater than our threshold value
+      if (pingerAverage_float_mm > PINGER_THRESHOLD_VALUE) {
+        // set it to the error value
+        pingerAverage_float_mm = PINGER_ERROR_VALUE;
       }
 
-      // round off and convert to an unsigned short
-      pingerData = (uint8_t) round(pingerAverage_float_cm);
+      // round off and convert to back to an unsigned 16bit
+      pingerData = (uint16_t) round(pingerAverage_float_mm);
 
     } else {
       // set to error
-      pingerData = (uint8_t) 255;
+      pingerData = (uint16_t) PINGER_ERROR_VALUE;
     }
 
     // if we weren't able to talk to the pinger
   } else {
 
-    // write 255 (error)
-    pingerData = (uint8_t) 255;
+    // write error value
+    pingerData = (uint16_t) PINGER_ERROR_VALUE;
   }
 
   // write the power pin low
