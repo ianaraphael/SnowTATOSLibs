@@ -16,12 +16,12 @@ ian.a.raphael.th@dartmouth.edu
 /***************************************************************************/
 /***************************** !USER SETTINGS! *****************************/
 /***************************************************************************/
-#define STATION_ID 0 // server is always 0
+#define STATION_ID 2 // 1,2,...n. server is always 0.
 #define SIMB_ID 1 // whichever SIMB buoy number this network is attached to
-#define TEST true // false for deployment
+// #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
-static uint8_t SAMPLING_INTERVAL_MIN = 60; // sampling interval in minutes
+static uint8_t SAMPLING_INTERVAL_MIN = 240; // sampling interval in minutes
 static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 #define NUM_TEMP_SENSORS 0 // number of sensors
 #define NUM_STATIONS 10 // number of nodes
@@ -34,7 +34,8 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 #define CLIENT_DATA_SIZE ((NUM_TEMP_SENSORS*TEMP_DATA_SIZE) + PINGER_DATA_SIZE + VOLTAGE_DATA_SIZE) // data size for each client transmission: 3temps * 2bytes + 1pinger bytes*1bytes + 1voltage * 1byte
 #define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
 
-#define PINGER_THRESHOLD_VALUE 2000 // threshold over which we do not consider data. 2000 mm (2 m) for now
+#define PINGER_MAX_VALUE 2000 // max value over which we do not consider data. 2000 mm (2 m) for now
+#define PINGER_MIN_VALUE 500 // min value under which we don't consider data. 500 mm (50 cm) for now
 #define PINGER_ERROR_VALUE 5000 // default error value
 #define VOLTAGE_ERROR_VALUE 255 // max 8bit val
 #define TEMP_ERROR_VALUE 32000 // +32 degrees
@@ -154,7 +155,7 @@ void packClientData(float *tempData, uint16_t pingerData, float voltage, uint8_t
   dataBuffer[pingerLoIndex] = lowByte(pingerData);
 
   // multiply voltage by ten and round to a short (so 3.35 v becomes 34, e.g., and later converts back to 3.4)
-  uint8_t voltageByte_times10 = round(voltage*10);
+  uint8_t voltageByte_times10 = round(voltage*10.0);
 
   // put it in the buffer
   dataBuffer[pingerHiIndex + PINGER_DATA_SIZE] = voltageByte_times10;
@@ -285,24 +286,25 @@ void setRadioFlag(void) {
 /*
 Function to initialize the radio
 */
-int init_Radio() {
+bool init_Radio() {
 
   // Serial2.print(F("[SX1276] Initializing ... "));
   // init the radio
   // default settings viewable at: https://github.com/jgromes/RadioLib/wiki/Default-configuration#sx127xrfm9x---lora-modem
   int state = radio.begin(RADIO_FREQ,RADIO_BANDWIDTH, 9, 7, 0x12, RADIO_POWER, 8, 0);
-  // int state = radio.begin(915.0, 125.0, 9, 7, 0x12, 10, 8, 0);
+
+  bool returnVal;
+
   if (state == RADIOLIB_ERR_NONE) {
-    Serial2.println(F("radio init'd successfully"));
+    returnVal = true;
   } else {
-    Serial2.print(F("radio init failed, code "));
-    Serial2.println(state);
+    returnVal = false;
   }
 
   // set the functions that will be called when packet transmission/receival is finished
   radio.setDio0Action(setRadioFlag,RISING);
 
-  return state;
+  return returnVal;
 }
 
 
@@ -369,14 +371,15 @@ returns:
 */
 int sendData_fromClient(uint8_t data[],uint8_t len) {
 
-  // allocate a buffer to hold the data + 1 byte for station id
-  byte sendBuf[len+1];
+  // allocate a buffer to hold the data + 2 bytes for network/station id
+  byte sendBuf[len+2];
 
   // put our station ID in
-  sendBuf[0] = (uint8_t) STATION_ID;
+  sendBuf[0] = (uint8_t) SIMB_ID;
+  sendBuf[1] = (uint8_t) STATION_ID;
 
   // copy the data in
-  memcpy(&sendBuf[1], data,len);
+  memcpy(&sendBuf[2], data,len);
 
   // start counting our attempts
   uint8_t transmissionAttempts = 0;
@@ -425,10 +428,10 @@ int sendData_fromClient(uint8_t data[],uint8_t len) {
         }
 
         // otherwise, if the message is from the server
-        if (ackArray[0] == (byte) SERVER_ADDRESS) {
+        if (ackArray[0] == (byte) SIMB_ID && ackArray[1] == (byte) SERVER_ADDRESS) {
 
           // if the ack term is valid
-          if (ackArray[1] == (uint8_t) ACK_TERM) {
+          if (ackArray[2] == (uint8_t) ACK_TERM) {
 
             // reset failed transmits count
             nFailedTransmits = 0;
@@ -436,7 +439,7 @@ int sendData_fromClient(uint8_t data[],uint8_t len) {
             // return success (0)
             return 0;
 
-          } else if (ackArray[1]==SYNC_TERM) {
+          } else if (ackArray[2]==SYNC_TERM) {
             // otherwise it's a sync message. set synced with server true
             syncedWithServer = true;
           }
@@ -506,16 +509,23 @@ int receiveData_fromClient(uint8_t* dataBuffer) {
       return -1;
     }
 
-    // get the sender ID
-    from = holdBuf[0];
+    // if data is from a different network
+    if (holdBuf[0] != SIMB_ID) {
+      // return error/no data received
+      return -1;
+    }
+
+    // otherwise get the sender ID
+    from = holdBuf[1];
 
     // copy the data into the passed buffer excepting the leading byte (station ID)
-    memcpy(dataBuffer,&holdBuf[1],numBytesReceived-1);
+    memcpy(dataBuffer,&holdBuf[2],numBytesReceived-2);
 
     // build an ack message
-    byte ack[2];
-    ack[0] = STATION_ID; // own ID
-    ack[1] = from; // sender ID
+    byte ack[3];
+    ack[0] = SIMB_ID; // own ID
+    ack[1] = STATION_ID;
+    ack[2] = from; // sender ID
 
     // transmit the acknowledgement
     sendPacketTimeout(ack,sizeof(ack));
@@ -562,10 +572,10 @@ bool attemptSyncWithServer() {
       // read the data into the array
       uint16_t state = radio.readData(ackArray, numBytesReceived);
 
-      // if the message is from the server
-      if (ackArray[0] == (byte) SERVER_ADDRESS) {
+      // if the message is from our server
+      if (ackArray[0] == (byte) SIMB_ID && ackArray[1] == (byte) SERVER_ADDRESS) {
         // if it's a sync message
-        if (ackArray[1]==SYNC_TERM) {
+        if (ackArray[2]==SYNC_TERM) {
           // set our flag true
           syncedWithServer = true;
           return true;
@@ -603,27 +613,30 @@ bool init_RTC() {
 /************************ alarms ************************/
 bool timeToSleep = false;
 bool justWokeUp = true;
+bool sleepAlarmActivated = false; // sleep alarm activated
 
 /************ wakeup_routine ************/
 /*
 */
 void wakeup_routine() {
   timeToSleep = false;
+  sleepAlarmActivated = false;
   justWokeUp = true;
 }
 
 /************ bedtime_routine ************/
 /*
+sets the timetosleep flag when the wakealarm rings
 */
 void bedtime_routine() {
   timeToSleep = true;
 }
 
-bool syncTimedOut = false;
-syncTimeout_routine() {
-  // if we time out, this function is called and the flag is set
-  syncTimedOut = true;
-}
+// bool syncTimedOut = false;
+// syncTimeout_routine() {
+//   // if we time out, this function is called and the flag is set
+//   syncTimedOut = true;
+// }
 
 /************ setSleepAlarm ************/
 /*
@@ -643,6 +656,7 @@ void setSleepAlarm(uint16_t sleepDuration_minutes) {
     uint16_t secondsUntilNextAlarm = sleepDuration_minutes * 60;
     RTCAVRZero.enableAlarm(secondsUntilNextAlarm, false);
   }
+  sleepAlarmActivated = true;
   RTCAVRZero.attachInterrupt(wakeup_routine);
 }
 
@@ -797,7 +811,7 @@ uint16_t readPinger() {
   delay(1000);
 
   // declare a short to hold the pinger data
-  uint8_t pingerData;
+  uint16_t pingerData;
 
   // query the pinger
   if (PINGER_BUS.available()) {
@@ -870,8 +884,8 @@ uint16_t readPinger() {
         // convert from ascii to an unsigned 16bit int
         uint16_t pingerRange_mm = atoi(pingerRange_char);
 
-        // if it's greater than our threshold value
-        if (pingerRange_mm > PINGER_THRESHOLD_VALUE) {
+        // if it's greater than our max value or less than our threshold value
+        if (pingerRange_mm > PINGER_MAX_VALUE || pingerRange_mm <  PINGER_MIN_VALUE) {
           // skip this one
           continue;
         }
@@ -891,14 +905,10 @@ uint16_t readPinger() {
     if (nGoodSamples >= N_PINGERSAMPLES) {
 
       // average the running sum
-      float pingerAverage_float_mm = (float)runningSum/N_PINGERSAMPLES;
+      float pingerAverage_float_mm = (float)runningSum/(float)nGoodSamples;
 
-      // TODO:\ check threshold value, make sure we are not including/passing error vals. max range
-      // pinger to surface
-      // send back two byte (mm res) value
-
-      // if it's greater than our threshold value
-      if (pingerAverage_float_mm > PINGER_THRESHOLD_VALUE) {
+      // if it's greater than our max value or less than threshold
+      if (pingerAverage_float_mm > PINGER_MAX_VALUE || pingerAverage_float_mm < PINGER_MIN_VALUE) {
         // set it to the error value
         pingerAverage_float_mm = PINGER_ERROR_VALUE;
       }

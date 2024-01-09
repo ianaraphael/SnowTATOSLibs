@@ -166,12 +166,6 @@ void sendDataToSimb(uint8_t *simbData) {
   // now that we're done sending data, reattach our chip select interrupt
   attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
   // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
-
-  // if we're supposed to be asleep right now
-  if (timeToSleep) {
-    // go back to sleep
-    LowPower.standby();
-  }
 }
 
 #endif
