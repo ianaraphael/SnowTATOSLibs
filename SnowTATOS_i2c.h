@@ -91,8 +91,8 @@ void init_I2C_scSide() {
   Wire.onRequest(requestEvent);
 
   // then attach an interrupt to trigger on a falling pin
-  attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
-  // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
+  // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
+  attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
 }
 
 
@@ -164,8 +164,8 @@ void sendDataToSimb(uint8_t *simbData) {
   maskSimbData(simbData);
 
   // now that we're done sending data, reattach our chip select interrupt
-  attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
-  // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
+  // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
+  attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
 }
 
 #endif

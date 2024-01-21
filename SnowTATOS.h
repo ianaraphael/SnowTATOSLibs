@@ -16,16 +16,15 @@ ian.a.raphael.th@dartmouth.edu
 /***************************************************************************/
 /***************************** !USER SETTINGS! *****************************/
 /***************************************************************************/
-#define STATION_ID 2 // 1,2,...n. server is always 0.
+#define STATION_ID 1 // 1,2,...n. server is always 0.
 #define SIMB_ID 1 // whichever SIMB buoy number this network is attached to
 // #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
-static uint8_t SAMPLING_INTERVAL_MIN = 240; // sampling interval in minutes
+static uint8_t SAMPLING_INTERVAL_MIN = 1; // sampling interval in minutes
 static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 #define NUM_TEMP_SENSORS 0 // number of sensors
 #define NUM_STATIONS 10 // number of nodes
-
 
 
 #define PINGER_DATA_SIZE 2
@@ -36,8 +35,14 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 
 #define PINGER_MAX_VALUE 2000 // max value over which we do not consider data. 2000 mm (2 m) for now
 #define PINGER_MIN_VALUE 500 // min value under which we don't consider data. 500 mm (50 cm) for now
-#define PINGER_ERROR_VALUE 5000 // default error value
-#define VOLTAGE_ERROR_VALUE 255 // max 8bit val
+
+#define PINGER_DEFAULT_VALUE 5000 // default "no data from node/nan" value
+#define PINGER_READ_ERROR_VALUE 5001 // node returned "read error" value
+#define PINGER_UNDERMIN_ERROR_VALUE 5002 // node returned under minimum threshold error value
+#define PINGER_OVERMAX_ERROR_VALUE 5003 // node returned over maximum threshold error value
+
+#define VOLTAGE_ERROR_VALUE 255 // max 8bit val (= 25.5 volts)
+
 #define TEMP_ERROR_VALUE 32000 // +32 degrees
 
 /****************** nothing below this line shared with SIMB ******************/
@@ -48,33 +53,33 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 /********************************** board **********************************/
 /***************************************************************************/
 
+#include <RocketScream_LowPowerAVRZero.h>
+
+/* Example on a 32-pin ATMega4808, LED on pin D7, using internal ULP OSC32K */
+const uint8_t unusedPins_client[] = {0, 1, 2, 3, 4, 5, 6, 11, 13,
+  14, 15, 16, 17, 18, 19, 20, 21, 23};
+
+const uint8_t unusedPins_server[] = {0, 1, 4, 5, 6, 8, 9, 13,
+  14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25};
+
 /************ Board setup ************/
-void boardSetup() {
+void boardSetup(const uint8_t unusedPins[]) {
 
   analogReadResolution(12);
 
   // generate a random seed value off of a floating analog pin
   randomSeed(analogRead(17));
 
-  unsigned char pinNumber;
+  uint8_t index;
 
-  // TODO: update these pin numbers
-  // // Pull up all unused pins to prevent floating vals
-  // for (pinNumber = 0; pinNumber < 23; pinNumber++) {
-  //   pinMode(pinNumber, INPUT_PULLUP);
-  // }
-  // for (pinNumber = 32; pinNumber < 42; pinNumber++) {
-  //   pinMode(pinNumber, INPUT_PULLUP);
-  // }
-  // pinMode(25, INPUT_PULLUP);
-  // pinMode(26, INPUT_PULLUP);
-  // pinMode(13, OUTPUT);
-  // digitalWrite(13, LOW);
+  for (index = 0; index < sizeof(unusedPins); index++) {
+    pinMode(unusedPins[index], OUTPUT);
+    digitalWrite(unusedPins[index],LOW);
+    LowPower.disablePinISC(unusedPins[index]);
+  }
 
-  // pinMode(4, OUTPUT);
-  // digitalWrite(4, HIGH);
-
-  // set our readout resolution
+  pinMode(LED_BUILTIN,OUTPUT);
+  digitalWrite(LED_BUILTIN,LOW);
 }
 
 
@@ -95,8 +100,8 @@ void maskSimbData(uint8_t *simbDataBuffer) {
   // create the standard "error" buffer vals
   uint8_t tempHighByte = highByte(uint16_t(TEMP_ERROR_VALUE));
   uint8_t tempLowByte = lowByte(uint16_t(TEMP_ERROR_VALUE));
-  uint8_t pingerHighByte = highByte(uint16_t(PINGER_ERROR_VALUE));
-  uint8_t pingerLowByte = lowByte(uint16_t(PINGER_ERROR_VALUE));
+  uint8_t pingerHighByte = highByte(uint16_t(PINGER_DEFAULT_VALUE));
+  uint8_t pingerLowByte = lowByte(uint16_t(PINGER_DEFAULT_VALUE));
   uint8_t voltageValue = uint8_t(VOLTAGE_ERROR_VALUE);
 
 
@@ -250,7 +255,7 @@ int nFailedTransmits = 0;
 // #define RADIO_TIMEOUT 10000 // max time to spend in radio comms in ms
 #define TRANSMISSION_TIMEOUT 1000 // max time to spend on individual transmit ms
 #define ACK_TIMEOUT 3000 // max time to wait for ack after transmit ms
-#define MAX_TRANSMISSION_ATTEMPTS 5 // maximum number of times for a client to retry sending data
+#define MAX_TRANSMISSION_ATTEMPTS 10 // maximum number of times for a client to retry sending data
 #define RADIO_FREQ 915.0 // radio frequency
 #define RADIO_BANDWIDTH 125.0
 #define RADIO_POWER 10
@@ -449,8 +454,8 @@ int sendData_fromClient(uint8_t data[],uint8_t len) {
       }
     }
 
-    // get a random delay between 0.1 and 10 seconds to prevent intractable collisions
-    uint16_t clientTransmitDelay = random(100,10001);
+    // get a random delay between 0.02 and 1 seconds to prevent intractable collisions
+    uint16_t clientTransmitDelay = random(20,1001);
     uint32_t transmitDelayStartTime = millis();
     while(millis() - transmitDelayStartTime < clientTransmitDelay);
 
@@ -596,7 +601,6 @@ bool attemptSyncWithServer() {
 /*********************************** rtc ***********************************/
 /***************************************************************************/
 
-#include <RocketScream_LowPowerAVRZero.h>
 #include <RocketScream_RTCAVRZero.h>
 
 /************ init_RTC() ************/
@@ -795,9 +799,11 @@ void readTemps(float* tempData) {
 // pinger
 #define PINGER_BUS Serial1 // serial port to read pinger
 #define PINGER_POWER 22 // pinger power line
-#define PINGER_TIMEOUT 100 // pinger timeout
-#define N_PINGERSAMPLES 5 // number of samples to average for each pinger reading
-#define MAX_PINGER_SAMPLE_ATTEMPTS 30 // maximum number of samples to attempt in order to achieve N_PINGERSAMPLES successfully
+#define PINGER_POWERUP_DELAY 500 // ms to allow pinger startup (maxbotix spec'd ~156 ms)
+#define PINGER_TIMEOUT 1000 // pinger TTL serial timeout
+#define PINGER_SAMPLING_DELAY 200 // ms between TTL serial read attempts (mb spec'd sampling period of ~150 ms)
+#define N_PINGERSAMPLES 10 // number of samples to average for each pinger reading
+#define MAX_PINGER_SAMPLE_ATTEMPTS 100 // maximum number of samples to attempt in order to achieve N_PINGERSAMPLES successfully
 
 // returns pinger range in mm
 uint16_t readPinger() {
@@ -806,15 +812,23 @@ uint16_t readPinger() {
   pinMode(PINGER_POWER, OUTPUT);
   digitalWrite(PINGER_POWER, HIGH);
 
-  // establish serial comms with the pinger
+  // let the pinger get through its powerup routine
+  delay(PINGER_POWERUP_DELAY);
+
+  // make sure we're on the right serial pins
+  PINGER_BUS.pins(8,9);
+
+  // begin our serial
   PINGER_BUS.begin(9600);
-  delay(1000);
+
+  // wait five seconds for serial comms
+  delay(10*PINGER_POWERUP_DELAY);
 
   // declare a short to hold the pinger data
   uint16_t pingerData;
 
   // query the pinger
-  if (PINGER_BUS.available()) {
+  if (PINGER_BUS.available()>0) {
 
     char pingerReadout[6]; // a 6 byte array to hold 5 bytes read off the pinger + null terminator
 
@@ -868,6 +882,9 @@ uint16_t readPinger() {
       // if it's a nan reading
       if (pingerReadout[0] == '\0') {
 
+        // set return value to read error
+        pingerData = (uint16_t) PINGER_READ_ERROR_VALUE;
+
         // continue to the next reading
         continue;
 
@@ -884,9 +901,22 @@ uint16_t readPinger() {
         // convert from ascii to an unsigned 16bit int
         uint16_t pingerRange_mm = atoi(pingerRange_char);
 
-        // if it's greater than our max value or less than our threshold value
-        if (pingerRange_mm > PINGER_MAX_VALUE || pingerRange_mm <  PINGER_MIN_VALUE) {
-          // skip this one
+        // if it's greater than our max value
+        if (pingerRange_mm > PINGER_MAX_VALUE){
+
+          // set it to the over max error value
+          pingerData = (uint16_t) PINGER_OVERMAX_ERROR_VALUE;
+
+          // and continue before adding to the running sum
+          continue;
+
+          // or less than our threshold value
+        } else if (pingerRange_mm <  PINGER_MIN_VALUE) {
+
+          // set it to the under min error value
+          pingerData = PINGER_UNDERMIN_ERROR_VALUE;
+
+          // and continue before adding to the running sum
           continue;
         }
 
@@ -897,7 +927,10 @@ uint16_t readPinger() {
         nGoodSamples++;
       }
 
-      // while we have fewer than N_PINGERSAMPLES and we haven't timed out
+      // delay for a moment
+      delay(PINGER_SAMPLING_DELAY);
+
+      // while we have fewer than N_PINGERSAMPLES and we haven't maxed out attempts
     } while (nGoodSamples < N_PINGERSAMPLES && nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
 
 
@@ -907,30 +940,47 @@ uint16_t readPinger() {
       // average the running sum
       float pingerAverage_float_mm = (float)runningSum/(float)nGoodSamples;
 
-      // if it's greater than our max value or less than threshold
-      if (pingerAverage_float_mm > PINGER_MAX_VALUE || pingerAverage_float_mm < PINGER_MIN_VALUE) {
-        // set it to the error value
-        pingerAverage_float_mm = PINGER_ERROR_VALUE;
+      // if it's greater than our max value
+      if (pingerAverage_float_mm > PINGER_MAX_VALUE) {
+
+        // set it to the over max error value
+        pingerAverage_float_mm = PINGER_OVERMAX_ERROR_VALUE;
+
+        // or less than threshold
+      } else if (pingerAverage_float_mm < PINGER_MIN_VALUE) {
+
+        // set it to the under min error value
+        pingerAverage_float_mm = PINGER_UNDERMIN_ERROR_VALUE;
       }
 
-      // round off and convert to back to an unsigned 16bit
+      // round off and convert to an unsigned 16bit
       pingerData = (uint16_t) round(pingerAverage_float_mm);
-
-    } else {
-      // set to error
-      pingerData = (uint16_t) PINGER_ERROR_VALUE;
     }
+    // else {
+    //   // set to error
+    //   pingerData = (uint16_t) PINGER_ERROR_VALUE;
+    // }
 
     // if we weren't able to talk to the pinger
   } else {
 
-    // write error value
-    pingerData = (uint16_t) PINGER_ERROR_VALUE;
+    // write the read error value
+    pingerData = (uint16_t) PINGER_READ_ERROR_VALUE;
   }
 
   // write the power pin low
   digitalWrite(PINGER_POWER, LOW);
 
+  // end the serial
+  PINGER_BUS.end();
+
+  // pull the serial pins low
+  pinMode(8,OUTPUT);
+  digitalWrite(8,LOW);
+  pinMode(9,INPUT);
+  digitalWrite(9,LOW);
+
+  // return the data
   return pingerData;
 }
 
@@ -944,7 +994,7 @@ uint16_t readPinger() {
 /****************************** server stuff ******************************/
 /**************************************************************************/
 // if we're the server
-#if STATION_ID == 0
+// #if STATION_ID == 0
 
 
 /***************************************************************************/
@@ -1049,7 +1099,7 @@ uint16_t readPinger() {
 // # endif
 
 /************************ end server stuff ************************/
-#endif
+// #endif
 
 /************************ end not shared with simb stuff ************************/
 #endif
