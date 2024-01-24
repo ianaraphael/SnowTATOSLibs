@@ -16,12 +16,13 @@ ian.a.raphael.th@dartmouth.edu
 /***************************************************************************/
 /***************************** !USER SETTINGS! *****************************/
 /***************************************************************************/
-#define STATION_ID 1 // 1,2,...n. server is always 0.
-#define SIMB_ID 1 // whichever SIMB buoy number this network is attached to
+#define PRINT_SERIAL false // true for serial print to terminal
+#define STATION_ID 0 // 1,2,...n. server is always 0.
+#define SIMB_ID 4 // whichever SIMB buoy number this network is attached to
 // #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
-static uint8_t SAMPLING_INTERVAL_MIN = 1; // sampling interval in minutes
+static uint8_t SAMPLING_INTERVAL_MIN = 240; // sampling interval in minutes
 static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to stay awake
 #define NUM_TEMP_SENSORS 0 // number of sensors
 #define NUM_STATIONS 10 // number of nodes
@@ -56,16 +57,19 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 #include <RocketScream_LowPowerAVRZero.h>
 
 /* Example on a 32-pin ATMega4808, LED on pin D7, using internal ULP OSC32K */
-const uint8_t unusedPins_client[] = {0, 1, 2, 3, 4, 5, 6, 11, 13,
+// const uint8_t unusedPins_client[] = {0, 1, 2, 3, 4, 5, 6, 11, 13,
+//   14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25};
+const uint8_t unusedPins_client[] = {2, 3, 4, 5, 6, 11, 13,
   14, 15, 16, 17, 18, 19, 20, 21, 23};
 
-const uint8_t unusedPins_server[] = {0, 1, 4, 5, 6, 8, 9, 13,
-  14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25};
+const uint8_t unusedPins_server[] = {0, 1, 4, 5, 6, 8, 9, 11, 13,
+  15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25};
+
+const uint8_t serialPins[] = {0,1,8,9,24,25};
+// const uint8_t unusedPins_server[] = {};
 
 /************ Board setup ************/
 void boardSetup(const uint8_t unusedPins[]) {
-
-  analogReadResolution(12);
 
   // generate a random seed value off of a floating analog pin
   randomSeed(analogRead(17));
@@ -73,10 +77,30 @@ void boardSetup(const uint8_t unusedPins[]) {
   uint8_t index;
 
   for (index = 0; index < sizeof(unusedPins); index++) {
-    pinMode(unusedPins[index], OUTPUT);
+    pinMode(unusedPins[index], INPUT);
     digitalWrite(unusedPins[index],LOW);
     LowPower.disablePinISC(unusedPins[index]);
   }
+
+  for (int i=0;i<sizeof(serialPins);i++){
+    LowPower.disablePinISC(serialPins[i]);
+  }
+
+  pinMode(0,INPUT);
+  digitalWrite(0,LOW);
+  pinMode(1,OUTPUT);
+  digitalWrite(1,LOW);
+
+  pinMode(8,INPUT);
+  digitalWrite(8,LOW);
+  pinMode(9,OUTPUT);
+  digitalWrite(9,LOW);
+
+  pinMode(24,INPUT);
+  digitalWrite(24,LOW);
+  pinMode(25,OUTPUT);
+  digitalWrite(25,LOW);
+
 
   pinMode(LED_BUILTIN,OUTPUT);
   digitalWrite(LED_BUILTIN,LOW);
@@ -797,8 +821,11 @@ void readTemps(float* tempData) {
 /**************************************************************************/
 
 // pinger
-#define PINGER_BUS Serial1 // serial port to read pinger
-#define PINGER_POWER 22 // pinger power line
+// #define PINGER_BUS Serial1 // serial port to read pinger
+// #define PINGER_POWER 22 // pinger power line
+#define PINGER_POWER 9
+#define PINGER_ANALOG_PIN 22
+
 #define PINGER_POWERUP_DELAY 500 // ms to allow pinger startup (maxbotix spec'd ~156 ms)
 #define PINGER_TIMEOUT 1000 // pinger TTL serial timeout
 #define PINGER_SAMPLING_DELAY 200 // ms between TTL serial read attempts (mb spec'd sampling period of ~150 ms)
@@ -808,39 +835,24 @@ void readTemps(float* tempData) {
 // returns pinger range in mm
 uint16_t readPinger() {
 
-  // write the power pin high
-  pinMode(PINGER_POWER, OUTPUT);
-  digitalWrite(PINGER_POWER, HIGH);
+    // write the power pin high
+    pinMode(PINGER_POWER, OUTPUT);
+    digitalWrite(PINGER_POWER, HIGH);
 
-  // let the pinger get through its powerup routine
-  delay(PINGER_POWERUP_DELAY);
+    // set the read pin mode
+    pinMode(PINGER_ANALOG_PIN,INPUT);
 
-  // make sure we're on the right serial pins
-  PINGER_BUS.pins(8,9);
+    // let the pinger get through its powerup routine
+    delay(PINGER_POWERUP_DELAY);
 
-  // begin our serial
-  PINGER_BUS.begin(9600);
-
-  // wait five seconds for serial comms
-  delay(10*PINGER_POWERUP_DELAY);
-
-  // declare a short to hold the pinger data
-  uint16_t pingerData;
-
-  // query the pinger
-  if (PINGER_BUS.available()>0) {
-
-    char pingerReadout[6]; // a 6 byte array to hold 5 bytes read off the pinger + null terminator
-
-    // set a timeout for reading the serial line
-    PINGER_BUS.setTimeout(PINGER_TIMEOUT);
+    // declare an int to hold the pinger data
+    uint16_t pingerData;
 
     // declare a float to hold the pinger value samples before averaging
     float runningSum = 0;
 
     // keep track of how many samples we've successfully collected
     int nGoodSamples = 0;
-
     int nLoops = 0;
 
     // loop while we have fewer than N_PINGERSAMPLES
@@ -849,90 +861,41 @@ uint16_t readPinger() {
       // increment our loop counter
       nLoops++;
 
-      // get the pinger readout
-      // The format of the pingers output is ascii: Rxxxx\r where x is a digit
-      // Thus we can read the streaming input until we catch '\r'
-      int nReturnedBytes = PINGER_BUS.readBytesUntil('\r',pingerReadout,sizeof(pingerReadout)-1);
+      // analog read the pinger
+      uint16_t adc_reading = analogRead(PINGER_ANALOG_PIN);
+      float volts = adc_reading*3.3/1024.0;
+      uint16_t pingerRange_mm = volts * 5120.0/3.3;
 
-      // add the null terminator
-      pingerReadout[5] = '\0';
+      // if it's greater than our max value
+      if (pingerRange_mm > PINGER_MAX_VALUE){
 
-      // if the readout doesn't conform to the R + 4 digits format
-      if ((pingerReadout[0] != 'R') || (nReturnedBytes != 5)) {
+        // set it to the over max error value
+        pingerData = (uint16_t) PINGER_OVERMAX_ERROR_VALUE;
 
-        // set the output to empty val (null terminator)
-        pingerReadout[0] = '\0';
-
-      } else {
-        // then for the following four chars
-        for (int i=1; i<5; i++) {
-
-          // if any of them aren't digits
-          if (!isDigit(pingerReadout[i])) {
-
-            // set the readout to empty val (null terminator)
-            pingerReadout[0] = '\0';
-
-            // and escape
-            break;
-          }
-        }
-      }
-
-      // if it's a nan reading
-      if (pingerReadout[0] == '\0') {
-
-        // set return value to read error
-        pingerData = (uint16_t) PINGER_READ_ERROR_VALUE;
-
-        // continue to the next reading
+        // and continue before adding to the running sum
         continue;
 
-        // else it's numerical
-      } else {
+        // or less than our threshold value
+      } else if (pingerRange_mm <  PINGER_MIN_VALUE) {
 
-        // allocate a 4 byte array to return the cleaned pinger range + null terminator
-        byte pingerRange_char[5];
-        // copy the numerical data over, skipping the leading R
-        for (int i=1;i<6;i++) {
-          pingerRange_char[i-1] = pingerReadout[i];
-        }
+        // set it to the under min error value
+        pingerData = PINGER_UNDERMIN_ERROR_VALUE;
 
-        // convert from ascii to an unsigned 16bit int
-        uint16_t pingerRange_mm = atoi(pingerRange_char);
-
-        // if it's greater than our max value
-        if (pingerRange_mm > PINGER_MAX_VALUE){
-
-          // set it to the over max error value
-          pingerData = (uint16_t) PINGER_OVERMAX_ERROR_VALUE;
-
-          // and continue before adding to the running sum
-          continue;
-
-          // or less than our threshold value
-        } else if (pingerRange_mm <  PINGER_MIN_VALUE) {
-
-          // set it to the under min error value
-          pingerData = PINGER_UNDERMIN_ERROR_VALUE;
-
-          // and continue before adding to the running sum
-          continue;
-        }
-
-        // otherwise add to the running sum
-        runningSum += pingerRange_mm;
-
-        // and increment our counter
-        nGoodSamples++;
+        // and continue before adding to the running sum
+        continue;
       }
+
+      // otherwise add to the running sum
+      runningSum += pingerRange_mm;
+
+      // and increment our counter
+      nGoodSamples++;
 
       // delay for a moment
       delay(PINGER_SAMPLING_DELAY);
 
       // while we have fewer than N_PINGERSAMPLES and we haven't maxed out attempts
     } while (nGoodSamples < N_PINGERSAMPLES && nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
-
 
     // if we got the req'd number of samples before timing out
     if (nGoodSamples >= N_PINGERSAMPLES) {
@@ -956,32 +919,193 @@ uint16_t readPinger() {
       // round off and convert to an unsigned 16bit
       pingerData = (uint16_t) round(pingerAverage_float_mm);
     }
-    // else {
-    //   // set to error
-    //   pingerData = (uint16_t) PINGER_ERROR_VALUE;
-    // }
 
-    // if we weren't able to talk to the pinger
-  } else {
+    pinMode(PINGER_POWER,INPUT);
+    // write the power pin low
+    digitalWrite(PINGER_POWER, LOW);
 
-    // write the read error value
-    pingerData = (uint16_t) PINGER_READ_ERROR_VALUE;
-  }
+    // set our pin state for the read pin
+    digitalWrite(PINGER_ANALOG_PIN,LOW);
 
-  // write the power pin low
-  digitalWrite(PINGER_POWER, LOW);
+    // return the data
+    return pingerData;
 
-  // end the serial
-  PINGER_BUS.end();
 
-  // pull the serial pins low
-  pinMode(8,OUTPUT);
-  digitalWrite(8,LOW);
-  pinMode(9,INPUT);
-  digitalWrite(9,LOW);
-
-  // return the data
-  return pingerData;
+  //
+  // // write the power pin high
+  // pinMode(PINGER_POWER, OUTPUT);
+  // digitalWrite(PINGER_POWER, HIGH);
+  //
+  // // let the pinger get through its powerup routine
+  // delay(PINGER_POWERUP_DELAY);
+  //
+  // // make sure we're on the right serial pins
+  // PINGER_BUS.pins(8,9);
+  //
+  // // begin our serial
+  // PINGER_BUS.begin(9600);
+  //
+  // // wait five seconds for serial comms
+  // delay(10*PINGER_POWERUP_DELAY);
+  //
+  // // declare a short to hold the pinger data
+  // uint16_t pingerData;
+  //
+  // // query the pinger
+  // if (PINGER_BUS.available()>0) {
+  //
+  //   char pingerReadout[6]; // a 6 byte array to hold 5 bytes read off the pinger + null terminator
+  //
+  //   // set a timeout for reading the serial line
+  //   PINGER_BUS.setTimeout(PINGER_TIMEOUT);
+  //
+  //   // declare a float to hold the pinger value samples before averaging
+  //   float runningSum = 0;
+  //
+  //   // keep track of how many samples we've successfully collected
+  //   int nGoodSamples = 0;
+  //
+  //   int nLoops = 0;
+  //
+  //   // loop while we have fewer than N_PINGERSAMPLES
+  //   do {
+  //
+  //     // increment our loop counter
+  //     nLoops++;
+  //
+  //     // get the pinger readout
+  //     // The format of the pingers output is ascii: Rxxxx\r where x is a digit
+  //     // Thus we can read the streaming input until we catch '\r'
+  //     int nReturnedBytes = PINGER_BUS.readBytesUntil('\r',pingerReadout,sizeof(pingerReadout)-1);
+  //
+  //     // add the null terminator
+  //     pingerReadout[5] = '\0';
+  //
+  //     // if the readout doesn't conform to the R + 4 digits format
+  //     if ((pingerReadout[0] != 'R') || (nReturnedBytes != 5)) {
+  //
+  //       // set the output to empty val (null terminator)
+  //       pingerReadout[0] = '\0';
+  //
+  //     } else {
+  //       // then for the following four chars
+  //       for (int i=1; i<5; i++) {
+  //
+  //         // if any of them aren't digits
+  //         if (!isDigit(pingerReadout[i])) {
+  //
+  //           // set the readout to empty val (null terminator)
+  //           pingerReadout[0] = '\0';
+  //
+  //           // and escape
+  //           break;
+  //         }
+  //       }
+  //     }
+  //
+  //     // if it's a nan reading
+  //     if (pingerReadout[0] == '\0') {
+  //
+  //       // set return value to read error
+  //       pingerData = (uint16_t) PINGER_READ_ERROR_VALUE;
+  //
+  //       // continue to the next reading
+  //       continue;
+  //
+  //       // else it's numerical
+  //     } else {
+  //
+  //       // allocate a 4 byte array to return the cleaned pinger range + null terminator
+  //       byte pingerRange_char[5];
+  //       // copy the numerical data over, skipping the leading R
+  //       for (int i=1;i<6;i++) {
+  //         pingerRange_char[i-1] = pingerReadout[i];
+  //       }
+  //
+  //       // convert from ascii to an unsigned 16bit int
+  //       uint16_t pingerRange_mm = atoi(pingerRange_char);
+  //
+  //       // if it's greater than our max value
+  //       if (pingerRange_mm > PINGER_MAX_VALUE){
+  //
+  //         // set it to the over max error value
+  //         pingerData = (uint16_t) PINGER_OVERMAX_ERROR_VALUE;
+  //
+  //         // and continue before adding to the running sum
+  //         continue;
+  //
+  //         // or less than our threshold value
+  //       } else if (pingerRange_mm <  PINGER_MIN_VALUE) {
+  //
+  //         // set it to the under min error value
+  //         pingerData = PINGER_UNDERMIN_ERROR_VALUE;
+  //
+  //         // and continue before adding to the running sum
+  //         continue;
+  //       }
+  //
+  //       // otherwise add to the running sum
+  //       runningSum += pingerRange_mm;
+  //
+  //       // and increment our counter
+  //       nGoodSamples++;
+  //     }
+  //
+  //     // delay for a moment
+  //     delay(PINGER_SAMPLING_DELAY);
+  //
+  //     // while we have fewer than N_PINGERSAMPLES and we haven't maxed out attempts
+  //   } while (nGoodSamples < N_PINGERSAMPLES && nLoops < MAX_PINGER_SAMPLE_ATTEMPTS);
+  //
+  //
+  //   // if we got the req'd number of samples before timing out
+  //   if (nGoodSamples >= N_PINGERSAMPLES) {
+  //
+  //     // average the running sum
+  //     float pingerAverage_float_mm = (float)runningSum/(float)nGoodSamples;
+  //
+  //     // if it's greater than our max value
+  //     if (pingerAverage_float_mm > PINGER_MAX_VALUE) {
+  //
+  //       // set it to the over max error value
+  //       pingerAverage_float_mm = PINGER_OVERMAX_ERROR_VALUE;
+  //
+  //       // or less than threshold
+  //     } else if (pingerAverage_float_mm < PINGER_MIN_VALUE) {
+  //
+  //       // set it to the under min error value
+  //       pingerAverage_float_mm = PINGER_UNDERMIN_ERROR_VALUE;
+  //     }
+  //
+  //     // round off and convert to an unsigned 16bit
+  //     pingerData = (uint16_t) round(pingerAverage_float_mm);
+  //   }
+  //   // else {
+  //   //   // set to error
+  //   //   pingerData = (uint16_t) PINGER_ERROR_VALUE;
+  //   // }
+  //
+  //   // if we weren't able to talk to the pinger
+  // } else {
+  //
+  //   // write the read error value
+  //   pingerData = (uint16_t) PINGER_READ_ERROR_VALUE;
+  // }
+  //
+  // // write the power pin low
+  // digitalWrite(PINGER_POWER, LOW);
+  //
+  // // end the serial
+  // PINGER_BUS.end();
+  //
+  // // pull the serial pins low
+  // pinMode(8,OUTPUT);
+  // digitalWrite(8,LOW);
+  // pinMode(9,INPUT);
+  // digitalWrite(9,LOW);
+  //
+  // // return the data
+  // return pingerData;
 }
 
 

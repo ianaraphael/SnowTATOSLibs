@@ -15,7 +15,7 @@ ian.a.raphael.th@dartmouth.edu
 
 #define SENSORCONTROLLER_ADDRESS 9 // Define sensor controller (SC) I2C Address
 #define MAX_PACKET_SIZE 32 // maximum i2c packet size
-#define SERVER_CS 11 // simb i2c chip select on server side
+#define SERVER_CS 14 // simb i2c chip select on server side
 #define I2C_TIMEOUT 30000 // 30 seconds
 
 
@@ -67,6 +67,10 @@ void simbInterruptHandler(void) {
 
     // set simbRequestFlag true
     simbRequestFlag = true;
+
+    // flash led
+    pinMode(LED_BUILTIN,OUTPUT);
+    digitalWrite(LED_BUILTIN,HIGH);
   }
 }
 
@@ -91,8 +95,8 @@ void init_I2C_scSide() {
   Wire.onRequest(requestEvent);
 
   // then attach an interrupt to trigger on a falling pin
-  // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
-  attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
+  attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, FALLING);
+  // attachInterrupt(digitalPinToInterrupt(SERVER_CS), simbInterruptHandler, LOW);
 }
 
 

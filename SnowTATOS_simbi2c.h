@@ -57,12 +57,12 @@ void getDataFromSensorController(uint8_t dataBuf[]) {
     Wire.read();
   }
 
-  // Serial.print("We expect this many bytes from SC: ");
+  Serial.print("We expect this many bytes from SC: ");
   Serial.println(SIMB_DATASIZE,DEC);
 
   // ask the SC to put the data on the wire
-  // Serial.print("SC put this many bytes on the wire: ");
   uint16_t nBytesCurrPacket = Wire.requestFrom(SENSORCONTROLLER_ADDRESS,SIMB_DATASIZE);
+  Serial.print("SC put this many bytes on the wire: ");
   Serial.println(nBytesCurrPacket,DEC);
 
   // if we have the right number of bytes
