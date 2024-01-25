@@ -18,7 +18,7 @@ ian.a.raphael.th@dartmouth.edu
 /***************************************************************************/
 #define PRINT_SERIAL false // true for serial print to terminal
 #define STATION_ID 0 // 1,2,...n. server is always 0.
-#define SIMB_ID 4 // whichever SIMB buoy number this network is attached to
+#define SIMB_ID 1 // whichever SIMB buoy number this network is attached to
 // #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
@@ -57,16 +57,11 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 #include <RocketScream_LowPowerAVRZero.h>
 
 /* Example on a 32-pin ATMega4808, LED on pin D7, using internal ULP OSC32K */
-// const uint8_t unusedPins_client[] = {0, 1, 2, 3, 4, 5, 6, 11, 13,
-//   14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25};
-const uint8_t unusedPins_client[] = {2, 3, 4, 5, 6, 11, 13,
-  14, 15, 16, 17, 18, 19, 20, 21, 23};
+const uint8_t unusedPins_client[] = {2, 3, 11, 14, 15, 16, 17, 18, 19, 20, 21, 23};
 
-const uint8_t unusedPins_server[] = {0, 1, 4, 5, 6, 8, 9, 11, 13,
-  15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25};
+const uint8_t unusedPins_server[] = {11, 15, 16, 17, 18, 19, 20, 21, 23};
 
-const uint8_t serialPins[] = {0,1,8,9,24,25};
-// const uint8_t unusedPins_server[] = {};
+const uint8_t serialPins[] = {0, 1, 8, 9, 24, 25};
 
 /************ Board setup ************/
 void boardSetup(const uint8_t unusedPins[]) {
@@ -840,7 +835,7 @@ uint16_t readPinger() {
     digitalWrite(PINGER_POWER, HIGH);
 
     // set the read pin mode
-    pinMode(PINGER_ANALOG_PIN,INPUT);
+    pinMode(PINGER_ANALOG_PIN,INPUT_PULLUP);
 
     // let the pinger get through its powerup routine
     delay(PINGER_POWERUP_DELAY);
