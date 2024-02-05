@@ -16,9 +16,9 @@ ian.a.raphael.th@dartmouth.edu
 /***************************************************************************/
 /***************************** !USER SETTINGS! *****************************/
 /***************************************************************************/
-#define PRINT_SERIAL false // true for serial print to terminal
+#define PRINT_SERIAL true // true for serial print to terminal
+#define SIMB_ID 4 // whichever SIMB buoy number this network is attached to
 #define STATION_ID 0 // 1,2,...n. server is always 0.
-#define SIMB_ID 1 // whichever SIMB buoy number this network is attached to
 // #define TEST true // false for deployment
 #define IRIDIUM_ENABLE false // deactivate for testing
 #define simbDeployment true // true it deploying system with SIMB
@@ -34,8 +34,8 @@ static uint8_t SERVER_WAKE_DURATION = 4; // number of minutes for the server to 
 #define CLIENT_DATA_SIZE ((NUM_TEMP_SENSORS*TEMP_DATA_SIZE) + PINGER_DATA_SIZE + VOLTAGE_DATA_SIZE) // data size for each client transmission: 3temps * 2bytes + 1pinger bytes*1bytes + 1voltage * 1byte
 #define SIMB_DATASIZE NUM_STATIONS*CLIENT_DATA_SIZE // datasize for the simb buffer
 
-#define PINGER_MAX_VALUE 2000 // max value over which we do not consider data. 2000 mm (2 m) for now
-#define PINGER_MIN_VALUE 500 // min value under which we don't consider data. 500 mm (50 cm) for now
+#define PINGER_MAX_VALUE 2250 // max value over which we do not consider data. 2000 mm (2 m) for now
+#define PINGER_MIN_VALUE 300 // min value under which we don't consider data. 500 mm (50 cm) for now
 
 #define PINGER_DEFAULT_VALUE 5000 // default "no data from node/nan" value
 #define PINGER_READ_ERROR_VALUE 5001 // node returned "read error" value
